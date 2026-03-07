@@ -22,10 +22,19 @@ All traffic routes through TokenWatch so that usage logging, key security, rate 
 Envelope encryption: a data key (AES-256) encrypts the raw provider key; the data key itself is encrypted by a KMS CMK. The database only stores the encrypted blob. Raw keys exist only in-memory during a single proxy request. This ensures that even if the database is compromised, no API keys are exposed.
 
 ### Redis sliding window rate limiting
-Chosen over fixed windows to prevent burst exploitation at window boundaries. Counter key: `ratelimit:{userId}:{windowStart}`. Lua script for atomic check-and-increment.
+Chosen over fixed windows to prevent burst exploitation at window boundaries. Counter key: `ratelimit:{userId}` (sorted set, scored by timestamp). Lua script for atomic check-and-increment.
 
-### BullMQ for async jobs
-All side effects (alerts, webhooks, usage summaries, spike detection) are handled async via BullMQ queues backed by Redis. This keeps the proxy request path fast and ensures usage logging failure doesn't affect the user.
+### Redis Pub/Sub for live dashboard
+After every proxy request completes, the gateway publishes a usage event to the `new_api_call` channel. The dashboard backend subscribes and pushes updates to connected clients via WebSockets — making the dashboard feel live without polling.
+
+### Redis prompt response caching
+Identical prompts (same model + parameters) are cached by `hash(prompt + params)` with a configurable TTL. Prevents paying a provider twice for the same question.
+
+### Redis API key validation
+Valid TokenWatch API keys are stored in a Redis Set (`valid_keys`). `SISMEMBER valid_keys {key}` is O(1) — avoids a database round-trip on every request.
+
+### arq for async jobs
+All side effects (alerts, webhooks, usage summaries, spike detection) are handled async via arq queues backed by Redis. This keeps the proxy request path fast and ensures usage logging failure doesn't affect the user.
 
 ### Fire-and-forget usage logging
 The proxy logs usage asynchronously after returning the response to the client. If the log fails, the user's request still succeeds. This keeps proxy latency overhead minimal (target: < 50ms p99 added latency).
