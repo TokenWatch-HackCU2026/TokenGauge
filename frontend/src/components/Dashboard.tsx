@@ -1,25 +1,19 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from "recharts";
-import { fetchSummary, fetchRecords, UsageSummary, UsageRecord } from "../api/client";
+import {
+  fetchRecords, fetchSummary, fetchDashboardSummary,
+  fetchTimeseries, fetchBreakdown, fetchQuota,
+  ApiCall, ApiCallSummary, TimeseriesPoint, BreakdownRow,
+} from "../api/client";
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 const C = {
   bg: "#0a0e1a",
   surface: "#111827",
-  surfaceHover: "#1c2740",
   border: "#1e2d40",
   accent: "#6366f1",
   accentLight: "#818cf8",
@@ -27,7 +21,6 @@ const C = {
   green: "#10b981",
   red: "#ef4444",
   yellow: "#f59e0b",
-  cyan: "#06b6d4",
   text: "#f1f5f9",
   muted: "#64748b",
   subtle: "#94a3b8",
@@ -42,22 +35,19 @@ const PROVIDER_COLORS: Record<string, string> = {
 
 const PIE_COLORS = ["#6366f1", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"];
 
-// ─── Mock / fallback data ─────────────────────────────────────────────────────
-const MOCK_TIMELINE = [
-  { date: "Mar 1", cost: 0.42 },
-  { date: "Mar 2", cost: 0.18 },
-  { date: "Mar 3", cost: 0.93 },
-  { date: "Mar 4", cost: 0.67 },
-  { date: "Mar 5", cost: 1.24 },
-  { date: "Mar 6", cost: 0.88 },
-  { date: "Mar 7", cost: 1.51 },
-];
-
+// ─── Mock data for keys (until issue #5 / key vault is done) ─────────────────
 const MOCK_KEYS = [
   { id: 1, provider: "openai", label: "Production key", hint: "sk-...a4c2", created: "Feb 28", active: true },
   { id: 2, provider: "anthropic", label: "Dev key", hint: "sk-ant-...b8f1", created: "Mar 1", active: true },
   { id: 3, provider: "google", label: "Gemini key", hint: "AIzaSy...x2k9", created: "Mar 3", active: false },
 ];
+
+// ─── Date range helpers ───────────────────────────────────────────────────────
+function rangeToParams(range: string) {
+  const now = new Date();
+  const ms = range === "24h" ? 86_400_000 : range === "7d" ? 7 * 86_400_000 : 30 * 86_400_000;
+  return { startDate: new Date(now.getTime() - ms).toISOString(), endDate: now.toISOString() };
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Page = "overview" | "usage" | "keys" | "settings";
@@ -72,24 +62,33 @@ const NAV_ITEMS: { id: Page; icon: string; label: string }[] = [
 // ─── Root ─────────────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [page, setPage] = useState<Page>("overview");
-  const [summary, setSummary] = useState<UsageSummary[]>([]);
-  const [records, setRecords] = useState<UsageRecord[]>([]);
-  const [loading, setLoading] = useState(true);
   const [range, setRange] = useState("7d");
+  const params = rangeToParams(range);
 
-  useEffect(() => {
-    Promise.all([fetchSummary(), fetchRecords()])
-      .then(([s, r]) => {
-        setSummary(s);
-        setRecords(r);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const totalCost = summary.reduce((a, s) => a + s.total_cost_usd, 0);
-  const totalTokens = summary.reduce((a, s) => a + s.total_input_tokens + s.total_output_tokens, 0);
-  const totalRequests = summary.reduce((a, s) => a + s.request_count, 0);
+  const { data: dashSummary } = useQuery({
+    queryKey: ["dashboard-summary", range],
+    queryFn: () => fetchDashboardSummary(params),
+  });
+  const { data: timeseries = [] } = useQuery({
+    queryKey: ["timeseries", range],
+    queryFn: () => fetchTimeseries({ ...params, groupBy: range === "24h" ? "hour" : "day" }),
+  });
+  const { data: breakdown = [] } = useQuery({
+    queryKey: ["breakdown", range],
+    queryFn: () => fetchBreakdown(params),
+  });
+  const { data: summary = [] } = useQuery({
+    queryKey: ["summary"],
+    queryFn: fetchSummary,
+  });
+  const { data: records = [], isLoading } = useQuery({
+    queryKey: ["records"],
+    queryFn: () => fetchRecords(100),
+  });
+  const { data: quota } = useQuery({
+    queryKey: ["quota"],
+    queryFn: fetchQuota,
+  });
 
   return (
     <div style={{ display: "flex", height: "100vh", background: C.bg, color: C.text, fontFamily: "'Inter', system-ui, sans-serif", overflow: "hidden" }}>
@@ -123,9 +122,9 @@ export default function Dashboard() {
         </nav>
 
         <div style={{ padding: "1rem 1.25rem", borderTop: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.75rem", fontWeight: 700 }}>JV</div>
+          <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.75rem", fontWeight: 700 }}>TW</div>
           <div>
-            <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>James V.</div>
+            <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>User</div>
             <div style={{ fontSize: "0.75rem", color: C.muted }}>Admin</div>
           </div>
         </div>
@@ -133,7 +132,6 @@ export default function Dashboard() {
 
       {/* ── Main ── */}
       <main style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
-        {/* Header */}
         <header style={{ padding: "1.25rem 2rem", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: C.surface, flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 600 }}>
             {NAV_ITEMS.find(n => n.id === page)?.label}
@@ -152,14 +150,13 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {/* Content */}
         <div style={{ flex: 1, padding: "1.75rem 2rem", overflow: "auto" }}>
           {page === "overview" && (
-            <OverviewPage summary={summary} records={records} totalCost={totalCost} totalTokens={totalTokens} totalRequests={totalRequests} loading={loading} />
+            <OverviewPage summary={summary} records={records} timeseries={timeseries} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} />
           )}
-          {page === "usage" && <UsagePage summary={summary} records={records} loading={loading} />}
+          {page === "usage" && <UsagePage summary={summary} records={records} loading={isLoading} />}
           {page === "keys" && <KeysPage />}
-          {page === "settings" && <SettingsPage />}
+          {page === "settings" && <SettingsPage quota={quota} />}
         </div>
       </main>
     </div>
@@ -167,43 +164,41 @@ export default function Dashboard() {
 }
 
 // ─── Overview ─────────────────────────────────────────────────────────────────
-function OverviewPage({ summary, records, totalCost, totalTokens, totalRequests, loading }: {
-  summary: UsageSummary[];
-  records: UsageRecord[];
-  totalCost: number;
-  totalTokens: number;
-  totalRequests: number;
+function OverviewPage({ summary, records, timeseries, breakdown, dashSummary, loading }: {
+  summary: ApiCallSummary[];
+  records: ApiCall[];
+  timeseries: TimeseriesPoint[];
+  breakdown: BreakdownRow[];
+  dashSummary: { total_tokens_in: number; total_tokens_out: number; total_cost_usd: number; request_count: number; avg_latency_ms: number } | undefined;
   loading: boolean;
 }) {
   const providerPie = Object.entries(
-    summary.reduce<Record<string, number>>((acc, s) => {
-      acc[s.provider] = (acc[s.provider] ?? 0) + s.total_cost_usd;
+    breakdown.reduce<Record<string, number>>((acc, r) => {
+      acc[r.provider] = (acc[r.provider] ?? 0) + r.cost_usd;
       return acc;
     }, {})
   ).map(([name, value]) => ({ name, value }));
 
   return (
     <div>
-      {/* KPI row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "1rem", marginBottom: "1.5rem" }}>
-        <KpiCard label="Total Spend" value={loading ? "—" : `$${totalCost.toFixed(4)}`} delta="+12%" up />
-        <KpiCard label="Total Tokens" value={loading ? "—" : fmtNum(totalTokens)} delta="+8%" up />
-        <KpiCard label="API Calls" value={loading ? "—" : fmtNum(totalRequests)} delta="+5%" up />
-        <KpiCard label="Active Keys" value="3" delta="" up />
+        <KpiCard label="Total Spend" value={loading ? "—" : `$${(dashSummary?.total_cost_usd ?? 0).toFixed(4)}`} />
+        <KpiCard label="Total Tokens" value={loading ? "—" : fmtNum((dashSummary?.total_tokens_in ?? 0) + (dashSummary?.total_tokens_out ?? 0))} />
+        <KpiCard label="API Calls" value={loading ? "—" : fmtNum(dashSummary?.request_count ?? 0)} />
+        <KpiCard label="Avg Latency" value={loading ? "—" : `${(dashSummary?.avg_latency_ms ?? 0).toFixed(0)}ms`} />
       </div>
 
-      {/* Charts row */}
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem", marginBottom: "1.5rem" }}>
-        <Card title="Spend over time" subtitle="USD per day">
+        <Card title="Spend over time" subtitle="USD per period">
           <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={MOCK_TIMELINE}>
+            <LineChart data={timeseries}>
               <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 12 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: C.muted, fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
               <Tooltip
                 contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
-                formatter={(v: number) => [`$${v.toFixed(3)}`, "Cost"]}
+                formatter={(v: number) => [`$${v.toFixed(4)}`, "Cost"]}
               />
-              <Line type="monotone" dataKey="cost" stroke={C.accent} strokeWidth={2.5} dot={false} />
+              <Line type="monotone" dataKey="cost_usd" stroke={C.accent} strokeWidth={2.5} dot={false} name="Cost" />
             </LineChart>
           </ResponsiveContainer>
         </Card>
@@ -228,19 +223,18 @@ function OverviewPage({ summary, records, totalCost, totalTokens, totalRequests,
         </Card>
       </div>
 
-      {/* Model bar */}
       <div style={{ marginBottom: "1.5rem" }}>
         <Card title="Cost by model" subtitle="USD total">
-          {summary.length > 0 ? (
+          {breakdown.length > 0 ? (
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={summary} barSize={28}>
+              <BarChart data={breakdown} barSize={28}>
                 <XAxis dataKey="model" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
                 <Tooltip
                   contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
                   formatter={(v: number) => [`$${v.toFixed(4)}`, "Cost"]}
                 />
-                <Bar dataKey="total_cost_usd" fill={C.accent} radius={[4, 4, 0, 0]} name="Cost (USD)" />
+                <Bar dataKey="cost_usd" fill={C.accent} radius={[4, 4, 0, 0]} name="Cost (USD)" />
               </BarChart>
             </ResponsiveContainer>
           ) : (
@@ -249,7 +243,6 @@ function OverviewPage({ summary, records, totalCost, totalTokens, totalRequests,
         </Card>
       </div>
 
-      {/* Recent requests */}
       <Card title="Recent requests" subtitle={`${records.length} total`}>
         <RequestsTable records={records.slice(0, 10)} />
       </Card>
@@ -258,10 +251,9 @@ function OverviewPage({ summary, records, totalCost, totalTokens, totalRequests,
 }
 
 // ─── Usage ────────────────────────────────────────────────────────────────────
-function UsagePage({ summary, records, loading }: { summary: UsageSummary[]; records: UsageRecord[]; loading: boolean }) {
+function UsagePage({ summary, records, loading }: { summary: ApiCallSummary[]; records: ApiCall[]; loading: boolean }) {
   const [filterProvider, setFilterProvider] = useState("all");
   const providers = ["all", ...Array.from(new Set(records.map(r => r.provider)))];
-
   const filtered = filterProvider === "all" ? records : records.filter(r => r.provider === filterProvider);
 
   return (
@@ -271,8 +263,8 @@ function UsagePage({ summary, records, loading }: { summary: UsageSummary[]; rec
           <Card key={`${s.provider}-${s.model}`} title={s.model} subtitle={s.provider}>
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: "0.5rem" }}>
               <Metric label="Requests" value={fmtNum(s.request_count)} />
-              <Metric label="Input tokens" value={fmtNum(s.total_input_tokens)} />
-              <Metric label="Output tokens" value={fmtNum(s.total_output_tokens)} />
+              <Metric label="In tokens" value={fmtNum(s.total_tokens_in)} />
+              <Metric label="Out tokens" value={fmtNum(s.total_tokens_out)} />
               <Metric label="Cost" value={`$${s.total_cost_usd.toFixed(4)}`} accent />
             </div>
           </Card>
@@ -320,7 +312,7 @@ function KeysPage() {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
-        <p style={{ margin: 0, color: C.muted, fontSize: "0.9rem" }}>Manage your AI provider keys. Keys are encrypted with AES-256 via AWS KMS.</p>
+        <p style={{ margin: 0, color: C.muted, fontSize: "0.9rem" }}>Manage your AI provider keys. Keys are encrypted with AES-256 via GCP KMS.</p>
         <button onClick={() => setShowAdd(v => !v)} style={btnStyle(C.accent)}>+ Add key</button>
       </div>
 
@@ -377,9 +369,25 @@ function KeysPage() {
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
-function SettingsPage() {
+function SettingsPage({ quota }: { quota: { limit: number; used: number; remaining: number; reset_at: number; window_ms: number } | undefined }) {
+  const pct = quota ? Math.round((quota.used / quota.limit) * 100) : 0;
+  const resetAt = quota ? new Date(quota.reset_at).toLocaleTimeString() : "—";
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem", maxWidth: 560 }}>
+      <Card title="Rate limit quota" subtitle={`Resets at ${resetAt}`}>
+        <div style={{ marginTop: "0.75rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", marginBottom: "0.4rem" }}>
+            <span style={{ color: C.subtle }}>{fmtNum(quota?.used ?? 0)} used</span>
+            <span style={{ color: C.muted }}>{fmtNum(quota?.limit ?? 0)} limit</span>
+          </div>
+          <div style={{ height: 8, background: C.border, borderRadius: 4, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${pct}%`, background: pct > 80 ? C.red : pct > 60 ? C.yellow : C.accent, borderRadius: 4, transition: "width 0.4s" }} />
+          </div>
+          <div style={{ fontSize: "0.8rem", color: C.muted, marginTop: "0.4rem" }}>{pct}% used · {fmtNum(quota?.remaining ?? 0)} remaining</div>
+        </div>
+      </Card>
+
       <Card title="Rate limits" subtitle="Set monthly token budgets per user">
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "0.75rem" }}>
           <LabeledInput label="Monthly token limit" defaultValue="5000000" />
@@ -410,28 +418,28 @@ function SettingsPage() {
 }
 
 // ─── Shared components ────────────────────────────────────────────────────────
-function RequestsTable({ records }: { records: UsageRecord[] }) {
+function RequestsTable({ records }: { records: ApiCall[] }) {
   if (records.length === 0) return <EmptyState label="No requests yet." />;
-  const TH = "0.8rem";
   return (
     <div style={{ overflowX: "auto", marginTop: "0.5rem" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
         <thead>
           <tr>
-            {["Time", "Provider", "Model", "Project", "In tokens", "Out tokens", "Cost"].map(h => (
-              <th key={h} style={{ textAlign: "left", padding: "0.5rem 0.75rem", color: C.muted, fontSize: TH, fontWeight: 500, borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" }}>{h}</th>
+            {["Time", "Provider", "Model", "App Tag", "In", "Out", "Latency", "Cost"].map(h => (
+              <th key={h} style={{ textAlign: "left", padding: "0.5rem 0.75rem", color: C.muted, fontSize: "0.8rem", fontWeight: 500, borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" }}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {records.map(r => (
             <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-              <td style={tdStyle}>{new Date(r.created_at).toLocaleString()}</td>
+              <td style={tdStyle}>{new Date(r.timestamp).toLocaleString()}</td>
               <td style={tdStyle}><ProviderBadge provider={r.provider} small /></td>
               <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: "0.8rem" }}>{r.model}</td>
-              <td style={{ ...tdStyle, color: C.muted }}>{r.project ?? "—"}</td>
-              <td style={tdStyle}>{r.input_tokens.toLocaleString()}</td>
-              <td style={tdStyle}>{r.output_tokens.toLocaleString()}</td>
+              <td style={{ ...tdStyle, color: C.muted }}>{r.app_tag ?? "—"}</td>
+              <td style={tdStyle}>{r.tokens_in.toLocaleString()}</td>
+              <td style={tdStyle}>{r.tokens_out.toLocaleString()}</td>
+              <td style={{ ...tdStyle, color: C.subtle }}>{r.latency_ms}ms</td>
               <td style={{ ...tdStyle, color: C.accentLight, fontWeight: 600 }}>${r.cost_usd.toFixed(6)}</td>
             </tr>
           ))}
@@ -441,14 +449,11 @@ function RequestsTable({ records }: { records: UsageRecord[] }) {
   );
 }
 
-function KpiCard({ label, value, delta, up }: { label: string; value: string; delta: string; up: boolean }) {
+function KpiCard({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1.25rem 1.5rem" }}>
       <div style={{ color: C.muted, fontSize: "0.8rem", marginBottom: "0.5rem" }}>{label}</div>
       <div style={{ fontSize: "1.75rem", fontWeight: 700, letterSpacing: "-0.03em" }}>{value}</div>
-      {delta && (
-        <div style={{ fontSize: "0.78rem", color: up ? C.green : C.red, marginTop: "0.25rem" }}>{delta} vs last period</div>
-      )}
     </div>
   );
 }
