@@ -1,67 +1,438 @@
 import { useEffect, useState } from "react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
+} from "recharts";
 import { fetchSummary, fetchRecords, UsageSummary, UsageRecord } from "../api/client";
 
+// ─── Theme ────────────────────────────────────────────────────────────────────
+const C = {
+  bg: "#0a0e1a",
+  surface: "#111827",
+  surfaceHover: "#1c2740",
+  border: "#1e2d40",
+  accent: "#6366f1",
+  accentLight: "#818cf8",
+  accentDim: "rgba(99,102,241,0.15)",
+  green: "#10b981",
+  red: "#ef4444",
+  yellow: "#f59e0b",
+  cyan: "#06b6d4",
+  text: "#f1f5f9",
+  muted: "#64748b",
+  subtle: "#94a3b8",
+} as const;
+
+const PROVIDER_COLORS: Record<string, string> = {
+  openai: "#10a37f",
+  anthropic: "#d97706",
+  google: "#4285f4",
+  mistral: "#7c3aed",
+};
+
+const PIE_COLORS = ["#6366f1", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"];
+
+// ─── Mock / fallback data ─────────────────────────────────────────────────────
+const MOCK_TIMELINE = [
+  { date: "Mar 1", cost: 0.42 },
+  { date: "Mar 2", cost: 0.18 },
+  { date: "Mar 3", cost: 0.93 },
+  { date: "Mar 4", cost: 0.67 },
+  { date: "Mar 5", cost: 1.24 },
+  { date: "Mar 6", cost: 0.88 },
+  { date: "Mar 7", cost: 1.51 },
+];
+
+const MOCK_KEYS = [
+  { id: 1, provider: "openai", label: "Production key", hint: "sk-...a4c2", created: "Feb 28", active: true },
+  { id: 2, provider: "anthropic", label: "Dev key", hint: "sk-ant-...b8f1", created: "Mar 1", active: true },
+  { id: 3, provider: "google", label: "Gemini key", hint: "AIzaSy...x2k9", created: "Mar 3", active: false },
+];
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+type Page = "overview" | "usage" | "keys" | "settings";
+
+const NAV_ITEMS: { id: Page; icon: string; label: string }[] = [
+  { id: "overview", icon: "◈", label: "Overview" },
+  { id: "usage", icon: "◉", label: "Usage" },
+  { id: "keys", icon: "◆", label: "API Keys" },
+  { id: "settings", icon: "◎", label: "Settings" },
+];
+
+// ─── Root ─────────────────────────────────────────────────────────────────────
 export default function Dashboard() {
+  const [page, setPage] = useState<Page>("overview");
   const [summary, setSummary] = useState<UsageSummary[]>([]);
   const [records, setRecords] = useState<UsageRecord[]>([]);
-
-  const load = async () => {
-    const [s, r] = await Promise.all([fetchSummary(), fetchRecords()]);
-    setSummary(s);
-    setRecords(r);
-  };
+  const [loading, setLoading] = useState(true);
+  const [range, setRange] = useState("7d");
 
   useEffect(() => {
-    load();
+    Promise.all([fetchSummary(), fetchRecords()])
+      .then(([s, r]) => {
+        setSummary(s);
+        setRecords(r);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
-  const totalCost = summary.reduce((acc, s) => acc + s.total_cost_usd, 0);
-  const totalTokens = summary.reduce(
-    (acc, s) => acc + s.total_input_tokens + s.total_output_tokens,
-    0
-  );
+  const totalCost = summary.reduce((a, s) => a + s.total_cost_usd, 0);
+  const totalTokens = summary.reduce((a, s) => a + s.total_input_tokens + s.total_output_tokens, 0);
+  const totalRequests = summary.reduce((a, s) => a + s.request_count, 0);
 
   return (
-    <div style={{ padding: "2rem", fontFamily: "sans-serif" }}>
-      <h1>TokenWatch</h1>
+    <div style={{ display: "flex", height: "100vh", background: C.bg, color: C.text, fontFamily: "'Inter', system-ui, sans-serif", overflow: "hidden" }}>
+      {/* ── Sidebar ── */}
+      <aside style={{ width: 220, background: C.surface, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", flexShrink: 0 }}>
+        <div style={{ padding: "1.5rem 1.25rem 1.25rem", borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem" }}>⬡</div>
+            <span style={{ fontWeight: 700, fontSize: "1.05rem", letterSpacing: "-0.02em" }}>TokenWatch</span>
+          </div>
+        </div>
 
-      <div style={{ display: "flex", gap: "2rem", marginBottom: "2rem" }}>
-        <StatCard label="Total Cost" value={`$${totalCost.toFixed(4)}`} />
-        <StatCard label="Total Tokens" value={totalTokens.toLocaleString()} />
-        <StatCard label="Requests" value={records.length.toString()} />
+        <nav style={{ flex: 1, padding: "0.75rem 0.5rem" }}>
+          {NAV_ITEMS.map(({ id, icon, label }) => (
+            <button
+              key={id}
+              onClick={() => setPage(id)}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: "0.75rem",
+                padding: "0.6rem 0.75rem", border: "none", borderRadius: 8, cursor: "pointer",
+                background: page === id ? C.accentDim : "transparent",
+                color: page === id ? C.accentLight : C.subtle,
+                fontSize: "0.9rem", fontWeight: page === id ? 600 : 400,
+                marginBottom: 2, transition: "all 0.15s",
+              }}
+            >
+              <span style={{ fontSize: "0.8rem" }}>{icon}</span>
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        <div style={{ padding: "1rem 1.25rem", borderTop: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.75rem", fontWeight: 700 }}>JV</div>
+          <div>
+            <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>James V.</div>
+            <div style={{ fontSize: "0.75rem", color: C.muted }}>Admin</div>
+          </div>
+        </div>
+      </aside>
+
+      {/* ── Main ── */}
+      <main style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
+        {/* Header */}
+        <header style={{ padding: "1.25rem 2rem", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: C.surface, flexShrink: 0 }}>
+          <h1 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 600 }}>
+            {NAV_ITEMS.find(n => n.id === page)?.label}
+          </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <select
+              value={range}
+              onChange={e => setRange(e.target.value)}
+              style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.4rem 0.75rem", fontSize: "0.85rem", cursor: "pointer" }}
+            >
+              <option value="24h">Last 24h</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+            </select>
+            <Pill color={C.green}>● Live</Pill>
+          </div>
+        </header>
+
+        {/* Content */}
+        <div style={{ flex: 1, padding: "1.75rem 2rem", overflow: "auto" }}>
+          {page === "overview" && (
+            <OverviewPage summary={summary} records={records} totalCost={totalCost} totalTokens={totalTokens} totalRequests={totalRequests} loading={loading} />
+          )}
+          {page === "usage" && <UsagePage summary={summary} records={records} loading={loading} />}
+          {page === "keys" && <KeysPage />}
+          {page === "settings" && <SettingsPage />}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ─── Overview ─────────────────────────────────────────────────────────────────
+function OverviewPage({ summary, records, totalCost, totalTokens, totalRequests, loading }: {
+  summary: UsageSummary[];
+  records: UsageRecord[];
+  totalCost: number;
+  totalTokens: number;
+  totalRequests: number;
+  loading: boolean;
+}) {
+  const providerPie = Object.entries(
+    summary.reduce<Record<string, number>>((acc, s) => {
+      acc[s.provider] = (acc[s.provider] ?? 0) + s.total_cost_usd;
+      return acc;
+    }, {})
+  ).map(([name, value]) => ({ name, value }));
+
+  return (
+    <div>
+      {/* KPI row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "1rem", marginBottom: "1.5rem" }}>
+        <KpiCard label="Total Spend" value={loading ? "—" : `$${totalCost.toFixed(4)}`} delta="+12%" up />
+        <KpiCard label="Total Tokens" value={loading ? "—" : fmtNum(totalTokens)} delta="+8%" up />
+        <KpiCard label="API Calls" value={loading ? "—" : fmtNum(totalRequests)} delta="+5%" up />
+        <KpiCard label="Active Keys" value="3" delta="" up />
       </div>
 
-      <h2>Cost by Model</h2>
-      <ResponsiveContainer width="100%" height={300}>
-        <BarChart data={summary}>
-          <XAxis dataKey="model" />
-          <YAxis />
-          <Tooltip formatter={(v: number) => `$${v.toFixed(4)}`} />
-          <Bar dataKey="total_cost_usd" fill="#6366f1" name="Cost (USD)" />
-        </BarChart>
-      </ResponsiveContainer>
+      {/* Charts row */}
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem", marginBottom: "1.5rem" }}>
+        <Card title="Spend over time" subtitle="USD per day">
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={MOCK_TIMELINE}>
+              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 12 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: C.muted, fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
+              <Tooltip
+                contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
+                formatter={(v: number) => [`$${v.toFixed(3)}`, "Cost"]}
+              />
+              <Line type="monotone" dataKey="cost" stroke={C.accent} strokeWidth={2.5} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
 
-      <h2 style={{ marginTop: "2rem" }}>Recent Requests</h2>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <Card title="Cost by provider" subtitle="% share">
+          {providerPie.length > 0 ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie data={providerPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3}>
+                  {providerPie.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                </Pie>
+                <Tooltip
+                  contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
+                  formatter={(v: number) => [`$${v.toFixed(4)}`, "Cost"]}
+                />
+                <Legend iconType="circle" iconSize={8} formatter={v => <span style={{ color: C.subtle, fontSize: 12 }}>{v}</span>} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <EmptyState label="No data yet" />
+          )}
+        </Card>
+      </div>
+
+      {/* Model bar */}
+      <div style={{ marginBottom: "1.5rem" }}>
+        <Card title="Cost by model" subtitle="USD total">
+          {summary.length > 0 ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={summary} barSize={28}>
+                <XAxis dataKey="model" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
+                <Tooltip
+                  contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
+                  formatter={(v: number) => [`$${v.toFixed(4)}`, "Cost"]}
+                />
+                <Bar dataKey="total_cost_usd" fill={C.accent} radius={[4, 4, 0, 0]} name="Cost (USD)" />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <EmptyState label="No model data yet" />
+          )}
+        </Card>
+      </div>
+
+      {/* Recent requests */}
+      <Card title="Recent requests" subtitle={`${records.length} total`}>
+        <RequestsTable records={records.slice(0, 10)} />
+      </Card>
+    </div>
+  );
+}
+
+// ─── Usage ────────────────────────────────────────────────────────────────────
+function UsagePage({ summary, records, loading }: { summary: UsageSummary[]; records: UsageRecord[]; loading: boolean }) {
+  const [filterProvider, setFilterProvider] = useState("all");
+  const providers = ["all", ...Array.from(new Set(records.map(r => r.provider)))];
+
+  const filtered = filterProvider === "all" ? records : records.filter(r => r.provider === filterProvider);
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem", marginBottom: "1.5rem" }}>
+        {summary.map(s => (
+          <Card key={`${s.provider}-${s.model}`} title={s.model} subtitle={s.provider}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "0.5rem" }}>
+              <Metric label="Requests" value={fmtNum(s.request_count)} />
+              <Metric label="Input tokens" value={fmtNum(s.total_input_tokens)} />
+              <Metric label="Output tokens" value={fmtNum(s.total_output_tokens)} />
+              <Metric label="Cost" value={`$${s.total_cost_usd.toFixed(4)}`} accent />
+            </div>
+          </Card>
+        ))}
+        {summary.length === 0 && !loading && (
+          <div style={{ gridColumn: "1/-1" }}>
+            <EmptyState label="No usage recorded yet. Log your first API call to see stats here." />
+          </div>
+        )}
+      </div>
+
+      <Card
+        title="All requests"
+        subtitle={`${filtered.length} records`}
+        action={
+          <select
+            value={filterProvider}
+            onChange={e => setFilterProvider(e.target.value)}
+            style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.35rem 0.6rem", fontSize: "0.8rem", cursor: "pointer" }}
+          >
+            {providers.map(p => <option key={p} value={p}>{p === "all" ? "All providers" : p}</option>)}
+          </select>
+        }
+      >
+        <RequestsTable records={filtered} />
+      </Card>
+    </div>
+  );
+}
+
+// ─── API Keys ─────────────────────────────────────────────────────────────────
+function KeysPage() {
+  const [keys, setKeys] = useState(MOCK_KEYS);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newProvider, setNewProvider] = useState("openai");
+  const [newLabel, setNewLabel] = useState("");
+
+  const addKey = () => {
+    if (!newLabel) return;
+    setKeys(prev => [...prev, { id: Date.now(), provider: newProvider, label: newLabel, hint: "sk-...????", created: "Mar 7", active: true }]);
+    setNewLabel("");
+    setShowAdd(false);
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
+        <p style={{ margin: 0, color: C.muted, fontSize: "0.9rem" }}>Manage your AI provider keys. Keys are encrypted with AES-256 via AWS KMS.</p>
+        <button onClick={() => setShowAdd(v => !v)} style={btnStyle(C.accent)}>+ Add key</button>
+      </div>
+
+      {showAdd && (
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1.25rem", marginBottom: "1.25rem" }}>
+          <div style={{ fontWeight: 600, marginBottom: "1rem" }}>Register new key</div>
+          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+            <select
+              value={newProvider}
+              onChange={e => setNewProvider(e.target.value)}
+              style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.5rem 0.75rem", fontSize: "0.9rem" }}
+            >
+              {["openai", "anthropic", "google", "mistral"].map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <input
+              placeholder="Key label (e.g. Production)"
+              value={newLabel}
+              onChange={e => setNewLabel(e.target.value)}
+              style={{ flex: 1, minWidth: 160, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.5rem 0.75rem", fontSize: "0.9rem" }}
+            />
+            <input
+              placeholder="Paste your API key (never stored)"
+              type="password"
+              style={{ flex: 2, minWidth: 200, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.5rem 0.75rem", fontSize: "0.9rem" }}
+            />
+            <button onClick={addKey} style={btnStyle(C.accent)}>Save</button>
+            <button onClick={() => setShowAdd(false)} style={btnStyle(C.muted)}>Cancel</button>
+          </div>
+          <p style={{ margin: "0.75rem 0 0", fontSize: "0.8rem", color: C.muted }}>Raw keys are never stored. Only an encrypted blob + last-4 hint is persisted.</p>
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+        {keys.map(key => (
+          <div key={key.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1rem 1.25rem", display: "flex", alignItems: "center", gap: "1rem" }}>
+            <ProviderBadge provider={key.provider} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{key.label}</div>
+              <div style={{ color: C.muted, fontSize: "0.8rem", fontFamily: "monospace", marginTop: 2 }}>{key.hint}</div>
+            </div>
+            <div style={{ color: C.muted, fontSize: "0.8rem" }}>Added {key.created}</div>
+            <Pill color={key.active ? C.green : C.muted}>{key.active ? "Active" : "Inactive"}</Pill>
+            <button
+              onClick={() => setKeys(prev => prev.filter(k => k.id !== key.id))}
+              style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.red, borderRadius: 8, padding: "0.35rem 0.75rem", cursor: "pointer", fontSize: "0.8rem" }}
+            >
+              Revoke
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+function SettingsPage() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem", maxWidth: 560 }}>
+      <Card title="Rate limits" subtitle="Set monthly token budgets per user">
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "0.75rem" }}>
+          <LabeledInput label="Monthly token limit" defaultValue="5000000" />
+          <LabeledInput label="Daily token limit" defaultValue="500000" />
+          <LabeledInput label="Alert threshold (%)" defaultValue="80" />
+          <button style={{ ...btnStyle(C.accent), alignSelf: "flex-start", marginTop: "0.25rem" }}>Save limits</button>
+        </div>
+      </Card>
+
+      <Card title="Alerts" subtitle="SMS alerts via Twilio when quotas are hit">
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "0.75rem" }}>
+          <LabeledInput label="Phone number" placeholder="+1 555 000 0000" />
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <input type="checkbox" id="sms-toggle" defaultChecked style={{ accentColor: C.accent }} />
+            <label htmlFor="sms-toggle" style={{ fontSize: "0.9rem", color: C.subtle }}>Enable SMS alerts at 80% / 100% quota</label>
+          </div>
+          <button style={{ ...btnStyle(C.accent), alignSelf: "flex-start" }}>Save alert settings</button>
+        </div>
+      </Card>
+
+      <Card title="Danger zone" subtitle="Irreversible actions">
+        <div style={{ marginTop: "0.75rem" }}>
+          <button style={btnStyle(C.red)}>Delete all usage records</button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Shared components ────────────────────────────────────────────────────────
+function RequestsTable({ records }: { records: UsageRecord[] }) {
+  if (records.length === 0) return <EmptyState label="No requests yet." />;
+  const TH = "0.8rem";
+  return (
+    <div style={{ overflowX: "auto", marginTop: "0.5rem" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
         <thead>
           <tr>
-            {["Time", "Provider", "Model", "In", "Out", "Cost"].map((h) => (
-              <th key={h} style={{ textAlign: "left", borderBottom: "1px solid #ccc", padding: "0.5rem" }}>
-                {h}
-              </th>
+            {["Time", "Provider", "Model", "Project", "In tokens", "Out tokens", "Cost"].map(h => (
+              <th key={h} style={{ textAlign: "left", padding: "0.5rem 0.75rem", color: C.muted, fontSize: TH, fontWeight: 500, borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" }}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {records.map((r) => (
-            <tr key={r.id}>
-              <td style={td}>{new Date(r.created_at).toLocaleString()}</td>
-              <td style={td}>{r.provider}</td>
-              <td style={td}>{r.model}</td>
-              <td style={td}>{r.input_tokens.toLocaleString()}</td>
-              <td style={td}>{r.output_tokens.toLocaleString()}</td>
-              <td style={td}>${r.cost_usd.toFixed(6)}</td>
+          {records.map(r => (
+            <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+              <td style={tdStyle}>{new Date(r.created_at).toLocaleString()}</td>
+              <td style={tdStyle}><ProviderBadge provider={r.provider} small /></td>
+              <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: "0.8rem" }}>{r.model}</td>
+              <td style={{ ...tdStyle, color: C.muted }}>{r.project ?? "—"}</td>
+              <td style={tdStyle}>{r.input_tokens.toLocaleString()}</td>
+              <td style={tdStyle}>{r.output_tokens.toLocaleString()}</td>
+              <td style={{ ...tdStyle, color: C.accentLight, fontWeight: 600 }}>${r.cost_usd.toFixed(6)}</td>
             </tr>
           ))}
         </tbody>
@@ -70,13 +441,89 @@ export default function Dashboard() {
   );
 }
 
-const td: React.CSSProperties = { padding: "0.5rem", borderBottom: "1px solid #eee" };
-
-function StatCard({ label, value }: { label: string; value: string }) {
+function KpiCard({ label, value, delta, up }: { label: string; value: string; delta: string; up: boolean }) {
   return (
-    <div style={{ background: "#f4f4f8", borderRadius: "8px", padding: "1rem 2rem", minWidth: "150px" }}>
-      <div style={{ fontSize: "0.85rem", color: "#666" }}>{label}</div>
-      <div style={{ fontSize: "1.75rem", fontWeight: "bold" }}>{value}</div>
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1.25rem 1.5rem" }}>
+      <div style={{ color: C.muted, fontSize: "0.8rem", marginBottom: "0.5rem" }}>{label}</div>
+      <div style={{ fontSize: "1.75rem", fontWeight: 700, letterSpacing: "-0.03em" }}>{value}</div>
+      {delta && (
+        <div style={{ fontSize: "0.78rem", color: up ? C.green : C.red, marginTop: "0.25rem" }}>{delta} vs last period</div>
+      )}
     </div>
   );
+}
+
+function Card({ title, subtitle, children, action }: { title: string; subtitle?: string; children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1.25rem 1.5rem" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1rem" }}>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: "0.95rem" }}>{title}</div>
+          {subtitle && <div style={{ color: C.muted, fontSize: "0.8rem", marginTop: 2 }}>{subtitle}</div>}
+        </div>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Metric({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div>
+      <div style={{ color: C.muted, fontSize: "0.75rem" }}>{label}</div>
+      <div style={{ fontWeight: 600, fontSize: "0.95rem", color: accent ? C.accentLight : C.text }}>{value}</div>
+    </div>
+  );
+}
+
+function Pill({ color, children }: { color: string; children: React.ReactNode }) {
+  return (
+    <span style={{ background: `${color}22`, color, borderRadius: 6, padding: "0.2rem 0.55rem", fontSize: "0.75rem", fontWeight: 600, whiteSpace: "nowrap" }}>
+      {children}
+    </span>
+  );
+}
+
+function ProviderBadge({ provider, small }: { provider: string; small?: boolean }) {
+  const color = PROVIDER_COLORS[provider] ?? C.muted;
+  return (
+    <span style={{ background: `${color}22`, color, borderRadius: 6, padding: small ? "0.15rem 0.4rem" : "0.3rem 0.65rem", fontSize: small ? "0.75rem" : "0.8rem", fontWeight: 600 }}>
+      {provider}
+    </span>
+  );
+}
+
+function EmptyState({ label }: { label: string }) {
+  return (
+    <div style={{ textAlign: "center", padding: "2.5rem 1rem", color: C.muted, fontSize: "0.9rem" }}>
+      <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>◌</div>
+      {label}
+    </div>
+  );
+}
+
+function LabeledInput({ label, defaultValue, placeholder }: { label: string; defaultValue?: string; placeholder?: string }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+      <label style={{ fontSize: "0.82rem", color: C.subtle }}>{label}</label>
+      <input
+        defaultValue={defaultValue}
+        placeholder={placeholder}
+        style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.5rem 0.75rem", fontSize: "0.9rem" }}
+      />
+    </div>
+  );
+}
+
+function btnStyle(color: string): React.CSSProperties {
+  return { background: color, color: "#fff", border: "none", borderRadius: 8, padding: "0.5rem 1rem", cursor: "pointer", fontSize: "0.85rem", fontWeight: 600 };
+}
+
+const tdStyle: React.CSSProperties = { padding: "0.6rem 0.75rem", verticalAlign: "middle" };
+
+function fmtNum(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toString();
 }

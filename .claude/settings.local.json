@@ -3,7 +3,17 @@
     "allow": [
       "Bash(git remote rename token_watch origin && git push -u origin main)",
       "Bash(git pull origin main --rebase && git push -u origin main)",
-      "Bash(git check-ignore -v context/memory/memory.md context/prompts/prompts.md context/agents/agents.md)"
+      "Bash(git check-ignore -v context/memory/memory.md context/prompts/prompts.md context/agents/agents.md)",
+      "Bash(git fetch --all && git branch -a)",
+      "Bash(git checkout --track origin/context && git checkout --track origin/setup && git checkout main)",
+      "Bash(git stash && git checkout --track origin/context && git checkout --track origin/setup && git checkout main && git stash pop)",
+      "Bash(brew install gh)",
+      "Bash(gh issue list --repo TokenWatch-HackCU2026/TokenWatch)",
+      "Bash(gh issue view 4 --repo TokenWatch-HackCU2026/TokenWatch)",
+      "Bash(cd /Users/james-vallery/Desktop/Code/HACKCU_2026/backend && python3 -m venv venv)",
+      "Bash(venv/bin/pip install -r requirements.txt)",
+      "Bash(sleep 2 && curl -s http://localhost:5173 | head -5)",
+      "Bash(sleep 3 && curl -s http://localhost:8000/health)"
     ]
   }
 }
