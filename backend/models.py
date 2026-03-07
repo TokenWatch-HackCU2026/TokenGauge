@@ -13,8 +13,22 @@ def _utcnow() -> datetime:
 
 class User(Document):
     email: EmailStr
-    password_hash: str
-    org_id: Optional[PydanticObjectId] = None
+    password_hash: Optional[str] = None  # None for Google OAuth-only users
+
+    # Profile
+    full_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    phone: Optional[str] = None
+    is_active: bool = True
+
+    # Google OAuth
+    google_id: Optional[str] = None
+    google_access_token: Optional[str] = None
+    google_refresh_token: Optional[str] = None
+
+    # JWT refresh token invalidation
+    refresh_token_hash: Optional[str] = None
+
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
@@ -22,22 +36,12 @@ class User(Document):
         name = "users"
         indexes = [
             pymongo.IndexModel([("email", pymongo.ASCENDING)], unique=True),
+            pymongo.IndexModel([("google_id", pymongo.ASCENDING)], unique=True, sparse=True),
         ]
-
-
-class Org(Document):
-    name: str
-    plan: str = "free"
-    owner_id: PydanticObjectId
-    created_at: datetime = Field(default_factory=_utcnow)
-
-    class Settings:
-        name = "orgs"
 
 
 class ApiKey(Document):
     user_id: PydanticObjectId
-    org_id: Optional[PydanticObjectId] = None
     provider: str
     encrypted_blob: str
     key_hint: str  # last 4 chars of the raw key
@@ -54,7 +58,6 @@ class ApiKey(Document):
 
 class ApiCall(Document):
     user_id: PydanticObjectId
-    org_id: Optional[PydanticObjectId] = None
     provider: str
     model: str
     tokens_in: int
@@ -75,9 +78,6 @@ class ApiCall(Document):
             ),
             pymongo.IndexModel(
                 [("user_id", pymongo.ASCENDING), ("model", pymongo.ASCENDING)]
-            ),
-            pymongo.IndexModel(
-                [("org_id", pymongo.ASCENDING), ("timestamp", pymongo.DESCENDING)]
             ),
         ]
 

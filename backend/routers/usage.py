@@ -1,6 +1,8 @@
 from typing import List
 
 from beanie import PydanticObjectId
+from bson import ObjectId
+from bson.errors import InvalidId
 from fastapi import APIRouter, HTTPException
 
 from models import ApiCall
@@ -10,6 +12,7 @@ router = APIRouter(prefix="/usage", tags=["usage"])
 
 # Placeholder user id used until auth is wired up
 _DEV_USER_ID = PydanticObjectId("000000000000000000000001")
+_DEV_USER_ID_RAW = ObjectId("000000000000000000000001")
 
 
 @router.post("/", response_model=ApiCallOut)
@@ -34,7 +37,7 @@ async def get_usage(limit: int = 100, skip: int = 0):
 @router.get("/summary", response_model=List[ApiCallSummary])
 async def get_summary():
     pipeline = [
-        {"$match": {"user_id": _DEV_USER_ID}},
+        {"$match": {"user_id": _DEV_USER_ID_RAW}},
         {
             "$group": {
                 "_id": {"provider": "$provider", "model": "$model"},
@@ -61,7 +64,10 @@ async def get_summary():
 
 @router.delete("/{record_id}")
 async def delete_record(record_id: str):
-    doc = await ApiCall.get(record_id)
+    try:
+        doc = await ApiCall.get(record_id)
+    except (InvalidId, Exception):
+        raise HTTPException(status_code=422, detail="Invalid record ID format")
     if not doc:
         raise HTTPException(status_code=404, detail="Record not found")
     await doc.delete()
