@@ -1,6 +1,37 @@
 from datetime import datetime
 from typing import Optional
 
+from pydantic import BaseModel, ConfigDict, EmailStr
+
+
+# --- Auth schemas ---
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str
+    org_id: Optional[int] = None
+    full_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    phone: Optional[str] = None
+    created_at: datetime
+
 from pydantic import BaseModel, EmailStr
 
 
