@@ -7,19 +7,20 @@ All endpoints are prefixed with `/api/v1`. Protected routes require `Authorizati
 ## Auth
 
 ### `POST /auth/register`
-Register a new user with email and password.
+Register a new user account.
 
 **Request**
 ```json
 {
   "email": "user@example.com",
-  "password": "..."
+  "password": "...",
+  "full_name": "Jane Doe"
 }
 ```
 **Response `201`**
 ```json
 {
-  "user": { "id": "...", "email": "..." },
+  "user": { "id": "...", "email": "...", "full_name": "..." },
   "access_token": "...",
   "refresh_token": "..."
 }
@@ -105,29 +106,11 @@ Update the authenticated user's profile. 🔒 Protected.
 **Request** *(all fields optional)*
 ```json
 {
+  "full_name": "Jane Doe",
   "phone": "+1..."
 }
 ```
 **Response `200`** — Updated user object.
-
----
-
-### `GET /auth/google`
-Redirect to Google OAuth consent screen. Returns a redirect to Google.
-
----
-
-### `GET /auth/google/callback`
-Google OAuth callback. Exchanges code for tokens and returns JWT pair.
-
-**Response `200`**
-```json
-{
-  "user": { "id": "...", "email": "...", "full_name": "...", "avatar_url": "..." },
-  "access_token": "...",
-  "refresh_token": "..."
-}
-```
 
 ---
 

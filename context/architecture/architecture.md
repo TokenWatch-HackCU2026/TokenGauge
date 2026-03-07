@@ -2,7 +2,7 @@
 
 ## Overview
 
-TokenWatch is a SaaS AI gateway and usage intelligence platform. All AI provider traffic routes through the TokenWatch proxy, enabling unified logging, cost tracking, key security, rate limiting, and model optimization.
+TokenWatch is a personal AI gateway and usage intelligence platform. All AI provider traffic routes through the TokenWatch proxy, enabling unified logging, cost tracking, key security, rate limiting, and model optimization.
 
 ```
 User App → TokenWatch Proxy → AI Provider (Anthropic / OpenAI / Google / Mistral)
@@ -31,7 +31,7 @@ User App → TokenWatch Proxy → AI Provider (Anthropic / OpenAI / Google / Mis
 ### 2. Auth System
 - JWT-based authentication (access token + refresh token)
 - User registration, login, logout endpoints
-- Google OAuth support
+- Google OAuth support for sign-in
 - Middleware validates JWT on all protected routes
 
 ### 3. API Key Vault
@@ -43,7 +43,7 @@ User App → TokenWatch Proxy → AI Provider (Anthropic / OpenAI / Google / Mis
 
 ### 4. Usage Database (MongoDB)
 Collections:
-- `users` — id, email, password_hash, full_name, avatar_url, phone, google_id, refresh_token_hash, created_at, updated_at
+- `users` — id, email, passwordHash, fullName, avatarUrl, phone, googleId, createdAt
 - `api_keys` — id, userId, provider, encryptedBlob, keyHint, createdAt
 - `api_calls` — id, userId, provider, model, tokensIn, tokensOut, costUsd, latencyMs, appTag, timestamp
 - `usage_summaries` — aggregated daily/weekly rollups per user

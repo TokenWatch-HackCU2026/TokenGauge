@@ -14,6 +14,7 @@ def _utcnow() -> datetime:
 class User(Document):
     email: EmailStr
     password_hash: Optional[str] = None  # None for Google OAuth-only users
+    org_id: Optional[PydanticObjectId] = None
 
     # Profile
     full_name: Optional[str] = None
