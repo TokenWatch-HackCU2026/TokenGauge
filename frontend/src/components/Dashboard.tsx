@@ -7,7 +7,7 @@ import {
 import {
   fetchRecords, fetchSummary, fetchDashboardSummary,
   fetchTimeseries, fetchBreakdown, fetchQuota,
-  ApiCall, ApiCallSummary, TimeseriesPoint, BreakdownRow,
+  ApiCall, ApiCallSummary, TimeseriesPoint, BreakdownRow, UserOut,
 } from "../api/client";
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
@@ -36,11 +36,7 @@ const PROVIDER_COLORS: Record<string, string> = {
 const PIE_COLORS = ["#6366f1", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"];
 
 // ─── Mock data for keys (until issue #5 / key vault is done) ─────────────────
-const MOCK_KEYS = [
-  { id: 1, provider: "openai", label: "Production key", hint: "sk-...a4c2", created: "Feb 28", active: true },
-  { id: 2, provider: "anthropic", label: "Dev key", hint: "sk-ant-...b8f1", created: "Mar 1", active: true },
-  { id: 3, provider: "google", label: "Gemini key", hint: "AIzaSy...x2k9", created: "Mar 3", active: false },
-];
+const MOCK_KEYS: { id: number; provider: string; label: string; hint: string; created: string; active: boolean }[] = [];
 
 // ─── Date range helpers ───────────────────────────────────────────────────────
 function rangeToParams(range: string) {
@@ -60,7 +56,7 @@ const NAV_ITEMS: { id: Page; icon: string; label: string }[] = [
 ];
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
-export default function Dashboard() {
+export default function Dashboard({ onLogout, user }: { onLogout?: () => void; user?: UserOut | null }) {
   const [page, setPage] = useState<Page>("overview");
   const [range, setRange] = useState("7d");
   const params = rangeToParams(range);
@@ -121,12 +117,28 @@ export default function Dashboard() {
           ))}
         </nav>
 
-        <div style={{ padding: "1rem 1.25rem", borderTop: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.75rem", fontWeight: 700 }}>TW</div>
-          <div>
-            <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>User</div>
-            <div style={{ fontSize: "0.75rem", color: C.muted }}>Admin</div>
+        <div style={{ padding: "1rem 1.25rem", borderTop: `1px solid ${C.border}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: onLogout ? "0.6rem" : 0 }}>
+            <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.85rem", fontWeight: 700, flexShrink: 0 }}>
+              {(user?.full_name ?? user?.email ?? "?")[0].toUpperCase()}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: "0.85rem", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {user?.full_name ?? user?.email ?? "User"}
+              </div>
+              <div style={{ fontSize: "0.75rem", color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {user?.email ?? ""}
+              </div>
+            </div>
           </div>
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              style={{ width: "100%", background: "transparent", border: `1px solid ${C.border}`, color: C.muted, borderRadius: 8, padding: "0.4rem", fontSize: "0.8rem", cursor: "pointer" }}
+            >
+              Sign out
+            </button>
+          )}
         </div>
       </aside>
 

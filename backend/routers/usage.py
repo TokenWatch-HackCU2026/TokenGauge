@@ -3,30 +3,29 @@ from typing import List
 from beanie import PydanticObjectId
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from auth import get_current_user
 from database import get_db
 from models import ApiCall
 from schemas import ApiCallCreate, ApiCallOut, ApiCallSummary
 
 router = APIRouter(prefix="/usage", tags=["usage"])
 
-# Placeholder user id used until auth is wired up
-_DEV_USER_ID = PydanticObjectId("000000000000000000000001")
-_DEV_USER_ID_RAW = ObjectId("000000000000000000000001")
-
 
 @router.post("/", response_model=ApiCallOut)
-async def log_usage(record: ApiCallCreate):
-    doc = ApiCall(user_id=_DEV_USER_ID, **record.model_dump())
+async def log_usage(record: ApiCallCreate, current_user: dict = Depends(get_current_user)):
+    uid = PydanticObjectId(current_user["user_id"])
+    doc = ApiCall(user_id=uid, **record.model_dump())
     await doc.insert()
     return _to_out(doc)
 
 
 @router.get("/", response_model=List[ApiCallOut])
-async def get_usage(limit: int = 100, skip: int = 0):
+async def get_usage(limit: int = 100, skip: int = 0, current_user: dict = Depends(get_current_user)):
+    uid = PydanticObjectId(current_user["user_id"])
     docs = (
-        await ApiCall.find(ApiCall.user_id == _DEV_USER_ID)
+        await ApiCall.find(ApiCall.user_id == uid)
         .sort(-ApiCall.timestamp)
         .skip(skip)
         .limit(limit)
@@ -36,9 +35,10 @@ async def get_usage(limit: int = 100, skip: int = 0):
 
 
 @router.get("/summary", response_model=List[ApiCallSummary])
-async def get_summary():
+async def get_summary(current_user: dict = Depends(get_current_user)):
+    uid = ObjectId(current_user["user_id"])
     pipeline = [
-        {"$match": {"user_id": _DEV_USER_ID_RAW}},
+        {"$match": {"user_id": uid}},
         {
             "$group": {
                 "_id": {"provider": "$provider", "model": "$model"},
@@ -64,13 +64,15 @@ async def get_summary():
 
 
 @router.delete("/{record_id}")
-async def delete_record(record_id: str):
+async def delete_record(record_id: str, current_user: dict = Depends(get_current_user)):
     try:
         doc = await ApiCall.get(record_id)
     except (InvalidId, Exception):
         raise HTTPException(status_code=422, detail="Invalid record ID format")
     if not doc:
         raise HTTPException(status_code=404, detail="Record not found")
+    if str(doc.user_id) != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Not your record")
     await doc.delete()
     return {"ok": True}
 
