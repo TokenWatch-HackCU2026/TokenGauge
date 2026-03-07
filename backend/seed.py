@@ -1,6 +1,6 @@
 """
 Seed script for local development.
-Creates a test org, test user, and fake api_calls if they don't already exist.
+Creates a test user and fake api_calls if they don't already exist.
 
 Usage:
     python seed.py           # skips api_calls if any exist
@@ -13,9 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from auth import hash_password
 from database import connect_db, disconnect_db
-from models import ApiCall, Org, User
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+from models import ApiCall, User
 
 TEST_EMAIL = "test@tokenwatch.dev"
 TEST_PASSWORD = "password123"
@@ -40,15 +38,6 @@ async def seed() -> None:
 
     from beanie import PydanticObjectId
     dev_uid = PydanticObjectId(_DEV_USER_ID_STR)
-
-    # ── Org ──────────────────────────────────────────────────────────────────
-    org = await Org.find_one(Org.name == ORG_NAME)
-    if not org:
-        org = Org(name=ORG_NAME, plan="free", owner_id=PydanticObjectId())
-        await org.insert()
-        print(f"[seed] Created org '{ORG_NAME}' -> {org.id}")
-    else:
-        print(f"[seed] Org already exists -> {org.id}")
 
     # ── User ─────────────────────────────────────────────────────────────────
     user = await User.find_one(User.email == TEST_EMAIL)
