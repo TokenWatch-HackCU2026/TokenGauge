@@ -7,7 +7,9 @@ python-dotenv
 httpx
 bcrypt==4.3.0
 python-jose[cryptography]
+cryptography
 pymongo
 redis[asyncio]
 aioredis
 arq
+google-cloud-kms

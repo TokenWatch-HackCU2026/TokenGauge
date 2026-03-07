@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend,
@@ -7,6 +7,7 @@ import {
 import {
   fetchRecords, fetchSummary, fetchDashboardSummary,
   fetchTimeseries, fetchBreakdown, fetchQuota,
+  fetchKeys, addKey, deleteKey,
   ApiCall, ApiCallSummary, TimeseriesPoint, BreakdownRow, UserOut,
 } from "../api/client";
 
@@ -34,9 +35,6 @@ const PROVIDER_COLORS: Record<string, string> = {
 };
 
 const PIE_COLORS = ["#6366f1", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"];
-
-// ─── Mock data for keys (until issue #5 / key vault is done) ─────────────────
-const MOCK_KEYS: { id: number; provider: string; label: string; hint: string; created: string; active: boolean }[] = [];
 
 // ─── Date range helpers ───────────────────────────────────────────────────────
 function rangeToParams(range: string) {
@@ -309,23 +307,46 @@ function UsagePage({ summary, records, loading }: { summary: ApiCallSummary[]; r
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 function KeysPage() {
-  const [keys, setKeys] = useState(MOCK_KEYS);
+  const qc = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
   const [newProvider, setNewProvider] = useState("openai");
   const [newLabel, setNewLabel] = useState("");
+  const [newApiKey, setNewApiKey] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
 
-  const addKey = () => {
-    if (!newLabel) return;
-    setKeys(prev => [...prev, { id: Date.now(), provider: newProvider, label: newLabel, hint: "sk-...????", created: "Mar 7", active: true }]);
-    setNewLabel("");
-    setShowAdd(false);
-  };
+  const { data: keys = [], isLoading } = useQuery({
+    queryKey: ["keys"],
+    queryFn: fetchKeys,
+  });
+
+  const addMutation = useMutation({
+    mutationFn: () => addKey(newProvider, newApiKey, newLabel || newProvider),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["keys"] });
+      setNewLabel("");
+      setNewApiKey("");
+      setShowAdd(false);
+      setFormError(null);
+    },
+    onError: (err: Error) => setFormError(err.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteKey(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["keys"] }),
+  });
+
+  function handleAdd() {
+    setFormError(null);
+    if (!newApiKey || newApiKey.length < 4) { setFormError("API key must be at least 4 characters"); return; }
+    addMutation.mutate();
+  }
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
         <p style={{ margin: 0, color: C.muted, fontSize: "0.9rem" }}>Manage your AI provider keys. Keys are encrypted with AES-256 via GCP KMS.</p>
-        <button onClick={() => setShowAdd(v => !v)} style={btnStyle(C.accent)}>+ Add key</button>
+        <button onClick={() => { setShowAdd(v => !v); setFormError(null); }} style={btnStyle(C.accent)}>+ Add key</button>
       </div>
 
       {showAdd && (
@@ -340,22 +361,29 @@ function KeysPage() {
               {["openai", "anthropic", "google", "mistral"].map(p => <option key={p} value={p}>{p}</option>)}
             </select>
             <input
-              placeholder="Key label (e.g. Production)"
+              placeholder="Label (e.g. Production)"
               value={newLabel}
               onChange={e => setNewLabel(e.target.value)}
               style={{ flex: 1, minWidth: 160, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.5rem 0.75rem", fontSize: "0.9rem" }}
             />
             <input
-              placeholder="Paste your API key (never stored)"
+              placeholder="Paste your API key"
               type="password"
+              value={newApiKey}
+              onChange={e => setNewApiKey(e.target.value)}
               style={{ flex: 2, minWidth: 200, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.5rem 0.75rem", fontSize: "0.9rem" }}
             />
-            <button onClick={addKey} style={btnStyle(C.accent)}>Save</button>
-            <button onClick={() => setShowAdd(false)} style={btnStyle(C.muted)}>Cancel</button>
+            <button onClick={handleAdd} disabled={addMutation.isPending} style={btnStyle(C.accent)}>
+              {addMutation.isPending ? "Saving…" : "Save"}
+            </button>
+            <button onClick={() => { setShowAdd(false); setFormError(null); }} style={btnStyle(C.muted)}>Cancel</button>
           </div>
+          {formError && <p style={{ margin: "0.5rem 0 0", fontSize: "0.82rem", color: C.red }}>{formError}</p>}
           <p style={{ margin: "0.75rem 0 0", fontSize: "0.8rem", color: C.muted }}>Raw keys are never stored. Only an encrypted blob + last-4 hint is persisted.</p>
         </div>
       )}
+
+      {isLoading && <EmptyState label="Loading keys…" />}
 
       <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
         {keys.map(key => (
@@ -363,18 +391,22 @@ function KeysPage() {
             <ProviderBadge provider={key.provider} />
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{key.label}</div>
-              <div style={{ color: C.muted, fontSize: "0.8rem", fontFamily: "monospace", marginTop: 2 }}>{key.hint}</div>
+              <div style={{ color: C.muted, fontSize: "0.8rem", fontFamily: "monospace", marginTop: 2 }}>{key.key_hint}</div>
             </div>
-            <div style={{ color: C.muted, fontSize: "0.8rem" }}>Added {key.created}</div>
-            <Pill color={key.active ? C.green : C.muted}>{key.active ? "Active" : "Inactive"}</Pill>
+            <div style={{ color: C.muted, fontSize: "0.8rem" }}>
+              Added {new Date(key.created_at).toLocaleDateString()}
+            </div>
+            <Pill color={C.green}>Active</Pill>
             <button
-              onClick={() => setKeys(prev => prev.filter(k => k.id !== key.id))}
+              onClick={() => deleteMutation.mutate(key.id)}
+              disabled={deleteMutation.isPending}
               style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.red, borderRadius: 8, padding: "0.35rem 0.75rem", cursor: "pointer", fontSize: "0.8rem" }}
             >
               Revoke
             </button>
           </div>
         ))}
+        {!isLoading && keys.length === 0 && <EmptyState label="No keys registered yet. Add one above." />}
       </div>
     </div>
   );

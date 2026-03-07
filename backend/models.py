@@ -47,6 +47,7 @@ class User(Document):
 class ApiKey(Document):
     user_id: PydanticObjectId
     provider: str
+    label: str = ""
     encrypted_blob: str
     key_hint: str  # last 4 chars of the raw key
     created_at: datetime = Field(default_factory=_utcnow)

@@ -5,18 +5,50 @@ function authHeaders(): HeadersInit {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+async function refreshAccessToken(): Promise<boolean> {
+  const refresh_token = localStorage.getItem("refresh_token");
+  if (!refresh_token) return false;
+  try {
+    const res = await fetch("/api/v1/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    localStorage.setItem("access_token", data.access_token);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(BASE + path, { headers: authHeaders() });
+  let res = await fetch(BASE + path, { headers: authHeaders() });
+  if (res.status === 401) {
+    const ok = await refreshAccessToken();
+    if (ok) res = await fetch(BASE + path, { headers: authHeaders() });
+  }
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(BASE + path, {
+  let res = await fetch(BASE + path, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
   });
+  if (res.status === 401 && path !== "/api/v1/auth/refresh") {
+    const ok = await refreshAccessToken();
+    if (ok) {
+      res = await fetch(BASE + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify(body),
+      });
+    }
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? res.statusText);
@@ -134,7 +166,7 @@ export async function logUsage(record: Omit<ApiCall, "id" | "user_id" | "timesta
 }
 
 export async function deleteRecord(id: string): Promise<void> {
-  await fetch(`${BASE}/usage/${id}`, { method: "DELETE", headers: authHeaders() });
+  return del(`/usage/${id}`);
 }
 
 // ── Dashboard endpoints ───────────────────────────────────────────────────────
@@ -173,4 +205,35 @@ export function fetchBreakdown(p: SummaryParams = {}): Promise<BreakdownRow[]> {
 
 export function fetchQuota(): Promise<QuotaOut> {
   return get("/dashboard/quota");
+}
+
+// ── Key vault endpoints ───────────────────────────────────────────────────────
+
+export interface ApiKeyOut {
+  id: string;
+  provider: string;
+  label: string;
+  key_hint: string;
+  created_at: string;
+}
+
+export function fetchKeys(): Promise<ApiKeyOut[]> {
+  return get("/keys/");
+}
+
+export function addKey(provider: string, api_key: string, label: string): Promise<ApiKeyOut> {
+  return post("/keys/", { provider, api_key, label });
+}
+
+async function del(path: string): Promise<void> {
+  let res = await fetch(BASE + path, { method: "DELETE", headers: authHeaders() });
+  if (res.status === 401) {
+    const ok = await refreshAccessToken();
+    if (ok) res = await fetch(BASE + path, { method: "DELETE", headers: authHeaders() });
+  }
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+}
+
+export async function deleteKey(id: string): Promise<void> {
+  return del(`/keys/${id}`);
 }
