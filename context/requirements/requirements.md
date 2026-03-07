@@ -16,8 +16,7 @@
 - FR-2.1: Users can register with email + password
 - FR-2.2: Users can log in and receive JWT access + refresh tokens
 - FR-2.3: Protected routes require a valid JWT
-- FR-2.4: Users can belong to an organization (multi-tenant)
-- FR-2.5: Token refresh endpoint to renew access tokens
+- FR-2.4: Token refresh endpoint to renew access tokens
 
 #### FR-3: API Key Vault
 - FR-3.1: Users can register API keys for each AI provider

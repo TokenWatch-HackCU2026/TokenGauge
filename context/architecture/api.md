@@ -7,20 +7,20 @@ All endpoints are prefixed with `/api/v1`. Protected routes require `Authorizati
 ## Auth
 
 ### `POST /auth/register`
-Register a new user and create an organization.
+Register a new user account.
 
 **Request**
 ```json
 {
   "email": "user@example.com",
   "password": "...",
-  "org_name": "My Company"
+  "full_name": "Jane Doe"
 }
 ```
 **Response `201`**
 ```json
 {
-  "user": { "id": "...", "email": "...", "org_id": "..." },
+  "user": { "id": "...", "email": "...", "full_name": "..." },
   "access_token": "...",
   "refresh_token": "..."
 }
@@ -91,7 +91,8 @@ Get the authenticated user's profile. 🔒 Protected.
 {
   "id": "...",
   "email": "...",
-  "org_id": "...",
+  "full_name": "...",
+  "avatar_url": "...",
   "phone": "+1...",
   "created_at": "2026-03-07T00:00:00Z"
 }
@@ -105,41 +106,11 @@ Update the authenticated user's profile. 🔒 Protected.
 **Request** *(all fields optional)*
 ```json
 {
+  "full_name": "Jane Doe",
   "phone": "+1..."
 }
 ```
 **Response `200`** — Updated user object.
-
----
-
-## Organizations
-
-### `GET /orgs/me`
-Get the authenticated user's organization. 🔒 Protected.
-
-**Response `200`**
-```json
-{
-  "id": "...",
-  "name": "My Company",
-  "plan": "free",
-  "owner_id": "...",
-  "created_at": "..."
-}
-```
-
----
-
-### `PATCH /orgs/me`
-Update the organization name. 🔒 Protected.
-
-**Request**
-```json
-{
-  "name": "New Org Name"
-}
-```
-**Response `200`** — Updated org object.
 
 ---
 
