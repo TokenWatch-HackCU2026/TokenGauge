@@ -11,8 +11,7 @@ import random
 import sys
 from datetime import datetime, timedelta, timezone
 
-from passlib.context import CryptContext
-
+from auth import hash_password
 from database import connect_db, disconnect_db
 from models import ApiCall, Org, User
 
@@ -20,7 +19,6 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 TEST_EMAIL = "test@tokenwatch.dev"
 TEST_PASSWORD = "password123"
-ORG_NAME = "Test Org"
 
 _DEV_USER_ID_STR = "000000000000000000000001"
 
@@ -57,12 +55,10 @@ async def seed() -> None:
     if not user:
         user = User(
             email=TEST_EMAIL,
-            password_hash=pwd_context.hash(TEST_PASSWORD),
-            org_id=org.id,
+            password_hash=hash_password(TEST_PASSWORD),
+            full_name="Test User",
         )
         await user.insert()
-        org.owner_id = user.id
-        await org.save()
         print(f"[seed] Created user '{TEST_EMAIL}' (password: {TEST_PASSWORD}) -> {user.id}")
     else:
         print(f"[seed] User already exists -> {user.id}")

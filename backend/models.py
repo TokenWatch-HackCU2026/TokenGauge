@@ -14,7 +14,6 @@ def _utcnow() -> datetime:
 class User(Document):
     email: EmailStr
     password_hash: Optional[str] = None  # None for Google OAuth-only users
-    org_id: Optional[PydanticObjectId] = None
 
     # Profile
     full_name: Optional[str] = None
@@ -41,19 +40,8 @@ class User(Document):
         ]
 
 
-class Org(Document):
-    name: str
-    plan: str = "free"
-    owner_id: PydanticObjectId
-    created_at: datetime = Field(default_factory=_utcnow)
-
-    class Settings:
-        name = "orgs"
-
-
 class ApiKey(Document):
     user_id: PydanticObjectId
-    org_id: Optional[PydanticObjectId] = None
     provider: str
     encrypted_blob: str
     key_hint: str  # last 4 chars of the raw key
@@ -70,7 +58,6 @@ class ApiKey(Document):
 
 class ApiCall(Document):
     user_id: PydanticObjectId
-    org_id: Optional[PydanticObjectId] = None
     provider: str
     model: str
     tokens_in: int
@@ -91,9 +78,6 @@ class ApiCall(Document):
             ),
             pymongo.IndexModel(
                 [("user_id", pymongo.ASCENDING), ("model", pymongo.ASCENDING)]
-            ),
-            pymongo.IndexModel(
-                [("org_id", pymongo.ASCENDING), ("timestamp", pymongo.DESCENDING)]
             ),
         ]
 

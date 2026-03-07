@@ -19,7 +19,7 @@ _client: motor.motor_asyncio.AsyncIOMotorClient | None = None
 async def connect_db() -> None:
     global _client
 
-    from models import User, Org, ApiKey, ApiCall, KeyAuditLog, Alert, SpikeEvent
+    from models import User, ApiKey, ApiCall, KeyAuditLog, Alert, SpikeEvent
 
     retries = 5
     for attempt in range(retries):
@@ -31,7 +31,7 @@ async def connect_db() -> None:
             await _client.admin.command("ping")
             await init_beanie(
                 database=_client[DB_NAME],
-                document_models=[User, Org, ApiKey, ApiCall, KeyAuditLog, Alert, SpikeEvent],
+                document_models=[User, ApiKey, ApiCall, KeyAuditLog, Alert, SpikeEvent],
             )
             logger.info("Connected to MongoDB (%s / %s)", MONGO_URI, DB_NAME)
             return

@@ -1,12 +1,11 @@
 import os
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
 bearer_scheme = HTTPBearer()
 
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
@@ -14,16 +13,24 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
-def create_access_token(user_id: str, org_id: str | None, email: str) -> str:
+def hash_token(token: str) -> str:
+    return bcrypt.hashpw(token.encode(), bcrypt.gensalt(rounds=12)).decode()
+
+
+def verify_token(plain: str, hashed: str) -> bool:
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
+
+
+def create_access_token(user_id: str, email: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"sub": user_id, "org_id": org_id, "email": email, "exp": expire}
+    payload = {"sub": user_id, "email": email, "exp": expire}
     return jwt.encode(payload, os.environ["JWT_SECRET"], algorithm="HS256")
 
 
@@ -49,7 +56,6 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
         payload = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=["HS256"])
         return {
             "user_id": payload["sub"],
-            "org_id": payload.get("org_id"),
             "email": payload.get("email"),
         }
     except JWTError:

@@ -9,8 +9,9 @@ from auth import (
     create_refresh_token,
     decode_refresh_token,
     hash_password,
-    pwd_context,
+    hash_token,
     verify_password,
+    verify_token,
 )
 from models import User
 from schemas import LoginRequest, RefreshRequest, RegisterRequest, UserOut
@@ -26,7 +27,6 @@ def _user_out(user: User) -> UserOut:
     return UserOut(
         id=str(user.id),
         email=user.email,
-        org_id=str(user.org_id) if user.org_id else None,
         full_name=user.full_name,
         avatar_url=user.avatar_url,
         phone=user.phone,
@@ -35,9 +35,9 @@ def _user_out(user: User) -> UserOut:
 
 
 async def _issue_tokens(user: User) -> tuple[str, str]:
-    access = create_access_token(str(user.id), str(user.org_id) if user.org_id else None, user.email)
+    access = create_access_token(str(user.id), user.email)
     refresh = create_refresh_token(str(user.id))
-    user.refresh_token_hash = pwd_context.hash(refresh)
+    user.refresh_token_hash = hash_token(refresh)
     await user.save()
     return access, refresh
 
@@ -71,9 +71,9 @@ async def refresh(body: RefreshRequest):
     user = await User.get(payload["sub"])
     if not user or not user.refresh_token_hash:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-    if not pwd_context.verify(body.refresh_token, user.refresh_token_hash):
+    if not verify_token(body.refresh_token, user.refresh_token_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-    access = create_access_token(str(user.id), str(user.org_id) if user.org_id else None, user.email)
+    access = create_access_token(str(user.id), user.email)
     return {"access_token": access, "expires_in": 900}
 
 

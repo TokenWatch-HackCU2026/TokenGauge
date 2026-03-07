@@ -1,0 +1,71 @@
+version: "3.8"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - DB_NAME=tokenwatch
+      - MONGO_URI=mongodb://mongo:27017
+      - REDIS_URL=redis://redis:6379
+      # Passes all local .env variables into the container
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app/backend
+      - ./redis:/app/redis
+    depends_on:
+      - mongo
+      - redis
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 3001 --reload
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app/backend
+      - ./redis:/app/redis
+    depends_on:
+      - redis
+      - api
+    command: arq redis.worker.WorkerSettings
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host
+
+  mongo:
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  mongo_data:
+  redis_data:
