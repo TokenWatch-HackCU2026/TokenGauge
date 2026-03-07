@@ -3,11 +3,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from database import engine
-import models
-from routers import auth, usage
 from database import connect_db, disconnect_db
-from routers import usage
+from routers import auth, usage
 
 
 @asynccontextmanager

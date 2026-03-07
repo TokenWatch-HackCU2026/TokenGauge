@@ -13,8 +13,23 @@ def _utcnow() -> datetime:
 
 class User(Document):
     email: EmailStr
-    password_hash: str
+    password_hash: Optional[str] = None  # None for Google OAuth-only users
     org_id: Optional[PydanticObjectId] = None
+
+    # Profile
+    full_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    phone: Optional[str] = None
+    is_active: bool = True
+
+    # Google OAuth
+    google_id: Optional[str] = None
+    google_access_token: Optional[str] = None
+    google_refresh_token: Optional[str] = None
+
+    # JWT refresh token invalidation
+    refresh_token_hash: Optional[str] = None
+
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
@@ -22,6 +37,7 @@ class User(Document):
         name = "users"
         indexes = [
             pymongo.IndexModel([("email", pymongo.ASCENDING)], unique=True),
+            pymongo.IndexModel([("google_id", pymongo.ASCENDING)], unique=True, sparse=True),
         ]
 
 

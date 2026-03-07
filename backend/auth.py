@@ -21,15 +21,15 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
-def create_access_token(user_id: int, org_id: int | None, email: str) -> str:
+def create_access_token(user_id: str, org_id: str | None, email: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"sub": str(user_id), "org_id": org_id, "email": email, "exp": expire}
+    payload = {"sub": user_id, "org_id": org_id, "email": email, "exp": expire}
     return jwt.encode(payload, os.environ["JWT_SECRET"], algorithm="HS256")
 
 
-def create_refresh_token(user_id: int) -> str:
+def create_refresh_token(user_id: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-    payload = {"sub": str(user_id), "exp": expire, "type": "refresh"}
+    payload = {"sub": user_id, "exp": expire, "type": "refresh"}
     return jwt.encode(payload, os.environ["JWT_REFRESH_SECRET"], algorithm="HS256")
 
 
@@ -48,7 +48,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
     try:
         payload = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=["HS256"])
         return {
-            "user_id": int(payload["sub"]),
+            "user_id": payload["sub"],
             "org_id": payload.get("org_id"),
             "email": payload.get("email"),
         }

@@ -2,8 +2,7 @@ import os
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, HTTPException, status
 
 from auth import (
     create_access_token,
@@ -13,7 +12,6 @@ from auth import (
     pwd_context,
     verify_password,
 )
-from database import get_db
 from models import User
 from schemas import LoginRequest, RefreshRequest, RegisterRequest, UserOut
 
@@ -24,60 +22,69 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
 
-def _issue_tokens(user: User) -> tuple[str, str]:
-    access = create_access_token(user.id, user.org_id, user.email)
-    refresh = create_refresh_token(user.id)
+def _user_out(user: User) -> UserOut:
+    return UserOut(
+        id=str(user.id),
+        email=user.email,
+        org_id=str(user.org_id) if user.org_id else None,
+        full_name=user.full_name,
+        avatar_url=user.avatar_url,
+        phone=user.phone,
+        created_at=user.created_at,
+    )
+
+
+async def _issue_tokens(user: User) -> tuple[str, str]:
+    access = create_access_token(str(user.id), str(user.org_id) if user.org_id else None, user.email)
+    refresh = create_refresh_token(str(user.id))
     user.refresh_token_hash = pwd_context.hash(refresh)
+    await user.save()
     return access, refresh
 
 
 @router.post("/register", status_code=201)
-def register(body: RegisterRequest, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == body.email).first():
+async def register(body: RegisterRequest):
+    if await User.find_one(User.email == body.email):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     user = User(
         email=body.email,
         password_hash=hash_password(body.password),
         full_name=body.full_name,
     )
-    db.add(user)
-    db.flush()
-    access, refresh = _issue_tokens(user)
-    db.commit()
-    db.refresh(user)
-    return {"access_token": access, "refresh_token": refresh, "user": UserOut.model_validate(user)}
+    await user.insert()
+    access, refresh = await _issue_tokens(user)
+    return {"access_token": access, "refresh_token": refresh, "user": _user_out(user)}
 
 
 @router.post("/login")
-def login(body: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == body.email).first()
+async def login(body: LoginRequest):
+    user = await User.find_one(User.email == body.email)
     if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    access, refresh = _issue_tokens(user)
-    db.commit()
+    access, refresh = await _issue_tokens(user)
     return {"access_token": access, "refresh_token": refresh, "expires_in": 900}
 
 
 @router.post("/refresh")
-def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
+async def refresh(body: RefreshRequest):
     payload = decode_refresh_token(body.refresh_token)
-    user = db.query(User).filter(User.id == int(payload["sub"])).first()
+    user = await User.get(payload["sub"])
     if not user or not user.refresh_token_hash:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     if not pwd_context.verify(body.refresh_token, user.refresh_token_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-    access = create_access_token(user.id, user.org_id, user.email)
+    access = create_access_token(str(user.id), str(user.org_id) if user.org_id else None, user.email)
     return {"access_token": access, "expires_in": 900}
 
 
 @router.post("/logout", status_code=204)
-def logout(body: RefreshRequest, db: Session = Depends(get_db)):
+async def logout(body: RefreshRequest):
     try:
         payload = decode_refresh_token(body.refresh_token)
-        user = db.query(User).filter(User.id == int(payload["sub"])).first()
+        user = await User.get(payload["sub"])
         if user:
             user.refresh_token_hash = None
-            db.commit()
+            await user.save()
     except HTTPException:
         pass  # Already invalid — treat as success
 
@@ -96,7 +103,7 @@ def google_login():
 
 
 @router.get("/google/callback")
-async def google_callback(code: str, db: Session = Depends(get_db)):
+async def google_callback(code: str):
     async with httpx.AsyncClient() as client:
         token_res = await client.post(GOOGLE_TOKEN_URL, data={
             "code": code,
@@ -117,14 +124,15 @@ async def google_callback(code: str, db: Session = Depends(get_db)):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to fetch Google user info")
         info = userinfo_res.json()
 
-    user = db.query(User).filter(User.google_id == info["id"]).first()
+    user = await User.find_one(User.google_id == info["id"])
     if not user:
-        # Check if the email already exists — link the accounts
-        user = db.query(User).filter(User.email == info["email"]).first()
+        # Check if email exists — link accounts
+        user = await User.find_one(User.email == info["email"])
         if user:
             user.google_id = info["id"]
             user.google_access_token = token_data.get("access_token")
             user.google_refresh_token = token_data.get("refresh_token")
+            await user.save()
         else:
             user = User(
                 email=info["email"],
@@ -134,10 +142,7 @@ async def google_callback(code: str, db: Session = Depends(get_db)):
                 google_access_token=token_data.get("access_token"),
                 google_refresh_token=token_data.get("refresh_token"),
             )
-            db.add(user)
-            db.flush()
+            await user.insert()
 
-    access, refresh = _issue_tokens(user)
-    db.commit()
-    db.refresh(user)
-    return {"access_token": access, "refresh_token": refresh, "user": UserOut.model_validate(user)}
+    access, refresh = await _issue_tokens(user)
+    return {"access_token": access, "refresh_token": refresh, "user": _user_out(user)}

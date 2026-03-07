@@ -4,7 +4,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, EmailStr
 
 
-# --- Auth schemas ---
+# --- Auth ---
 
 class RegisterRequest(BaseModel):
     email: EmailStr
@@ -24,15 +24,19 @@ class RefreshRequest(BaseModel):
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: str
     email: str
-    org_id: Optional[int] = None
+    org_id: Optional[str] = None
     full_name: Optional[str] = None
     avatar_url: Optional[str] = None
     phone: Optional[str] = None
     created_at: datetime
 
-from pydantic import BaseModel, EmailStr
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
 
 
 # --- ApiCall ---
@@ -63,26 +67,3 @@ class ApiCallSummary(BaseModel):
     total_tokens_out: int
     total_cost_usd: float
     request_count: int
-
-
-# --- Auth ---
-
-class UserCreate(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class UserOut(BaseModel):
-    id: str
-    email: EmailStr
-    org_id: Optional[str] = None
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
