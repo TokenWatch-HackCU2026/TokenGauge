@@ -1,8 +1,10 @@
 fastapi
 uvicorn[standard]
-sqlalchemy
+motor
+beanie
 pydantic[email]
 python-dotenv
 httpx
-python-jose[cryptography]
 passlib[bcrypt]
+python-jose[cryptography]
+pymongo

@@ -19,13 +19,16 @@
 - **Indexes**: `api_calls` must have compound indexes on `{ userId, timestamp }`, `{ userId, provider }`, `{ userId, model }`
 
 ### Redis + aioredis
-- **Purpose**: Rate limit counters, session cache, dashboard cache, arq backing store
+- **Purpose**: Rate limit counters, session cache, dashboard cache, Pub/Sub live feed, prompt cache, API key validation, arq backing store
 - **Key packages**: `aioredis`, `arq`
 - **Connection**: `REDIS_URL` env var
 - **Key naming conventions**:
-  - `ratelimit:{userId}` — sorted set for sliding window
+  - `ratelimit:{userId}` — sorted set for sliding window (scored by timestamp ms)
   - `session:{userId}` — JWT validation cache (TTL 300s)
   - `dashboard:{userId}:{hash}` — query result cache (TTL 60s)
+  - `cache:{hash(prompt+params)}` — prompt response cache (configurable TTL)
+  - `valid_keys` — Redis Set of active TokenWatch API keys (O(1) SISMEMBER lookup)
+- **Pub/Sub channel**: `new_api_call` — published after every proxy request; dashboard subscribes for live updates
 
 ---
 

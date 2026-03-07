@@ -32,28 +32,57 @@ class UserOut(BaseModel):
     phone: Optional[str] = None
     created_at: datetime
 
+from pydantic import BaseModel, EmailStr
 
-class UsageRecordCreate(BaseModel):
+
+# --- ApiCall ---
+
+class ApiCallCreate(BaseModel):
     provider: str
     model: str
-    input_tokens: int
-    output_tokens: int
+    tokens_in: int
+    tokens_out: int
     cost_usd: float
-    project: Optional[str] = None
+    latency_ms: int
+    app_tag: Optional[str] = None
 
 
-class UsageRecordOut(UsageRecordCreate):
-    id: int
+class ApiCallOut(ApiCallCreate):
+    id: str
+    user_id: str
+    timestamp: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ApiCallSummary(BaseModel):
+    provider: str
+    model: str
+    total_tokens_in: int
+    total_tokens_out: int
+    total_cost_usd: float
+    request_count: int
+
+
+# --- Auth ---
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserOut(BaseModel):
+    id: str
+    email: EmailStr
+    org_id: Optional[str] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
 
 
-class UsageSummary(BaseModel):
-    provider: str
-    model: str
-    total_input_tokens: int
-    total_output_tokens: int
-    total_cost_usd: float
-    request_count: int
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"

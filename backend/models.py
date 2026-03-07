@@ -1,42 +1,115 @@
-from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime
-from sqlalchemy.sql import func
-from database import Base
+from datetime import datetime, timezone
+from typing import Literal, Optional
+
+import pymongo
+from beanie import Document
+from pydantic import EmailStr, Field
+from beanie import PydanticObjectId
 
 
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True, nullable=False)
-
-    # Password auth (nullable — Google OAuth users have no password)
-    password_hash = Column(String, nullable=True)
-
-    # Google OAuth
-    google_id = Column(String, unique=True, nullable=True, index=True)
-    google_access_token = Column(String, nullable=True)
-    google_refresh_token = Column(String, nullable=True)
-
-    # General info
-    full_name = Column(String, nullable=True)
-    avatar_url = Column(String, nullable=True)
-    phone = Column(String, nullable=True)
-    org_id = Column(Integer, nullable=True, index=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    refresh_token_hash = Column(String, nullable=True)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-class UsageRecord(Base):
-    __tablename__ = "usage_records"
+class User(Document):
+    email: EmailStr
+    password_hash: str
+    org_id: Optional[PydanticObjectId] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
 
-    id = Column(Integer, primary_key=True, index=True)
-    provider = Column(String, index=True)       # e.g. "openai", "anthropic"
-    model = Column(String, index=True)          # e.g. "gpt-4o", "claude-3-5-sonnet"
-    input_tokens = Column(Integer, default=0)
-    output_tokens = Column(Integer, default=0)
-    cost_usd = Column(Float, default=0.0)
-    project = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    class Settings:
+        name = "users"
+        indexes = [
+            pymongo.IndexModel([("email", pymongo.ASCENDING)], unique=True),
+        ]
+
+
+class Org(Document):
+    name: str
+    plan: str = "free"
+    owner_id: PydanticObjectId
+    created_at: datetime = Field(default_factory=_utcnow)
+
+    class Settings:
+        name = "orgs"
+
+
+class ApiKey(Document):
+    user_id: PydanticObjectId
+    org_id: Optional[PydanticObjectId] = None
+    provider: str
+    encrypted_blob: str
+    key_hint: str  # last 4 chars of the raw key
+    created_at: datetime = Field(default_factory=_utcnow)
+
+    class Settings:
+        name = "api_keys"
+        indexes = [
+            pymongo.IndexModel(
+                [("user_id", pymongo.ASCENDING), ("provider", pymongo.ASCENDING)]
+            ),
+        ]
+
+
+class ApiCall(Document):
+    user_id: PydanticObjectId
+    org_id: Optional[PydanticObjectId] = None
+    provider: str
+    model: str
+    tokens_in: int
+    tokens_out: int
+    cost_usd: float
+    latency_ms: int
+    app_tag: Optional[str] = None
+    timestamp: datetime = Field(default_factory=_utcnow)
+
+    class Settings:
+        name = "api_calls"
+        indexes = [
+            pymongo.IndexModel(
+                [("user_id", pymongo.ASCENDING), ("timestamp", pymongo.DESCENDING)]
+            ),
+            pymongo.IndexModel(
+                [("user_id", pymongo.ASCENDING), ("provider", pymongo.ASCENDING)]
+            ),
+            pymongo.IndexModel(
+                [("user_id", pymongo.ASCENDING), ("model", pymongo.ASCENDING)]
+            ),
+            pymongo.IndexModel(
+                [("org_id", pymongo.ASCENDING), ("timestamp", pymongo.DESCENDING)]
+            ),
+        ]
+
+
+class KeyAuditLog(Document):
+    user_id: PydanticObjectId
+    key_id: PydanticObjectId
+    request_id: str
+    action: str
+    timestamp: datetime = Field(default_factory=_utcnow)
+
+    class Settings:
+        name = "key_audit_log"
+
+
+class Alert(Document):
+    user_id: PydanticObjectId
+    type: Literal["limit", "spike"]
+    threshold: float
+    triggered_at: Optional[datetime] = None
+    acknowledged: bool = False
+
+    class Settings:
+        name = "alerts"
+
+
+class SpikeEvent(Document):
+    user_id: PydanticObjectId
+    detected_at: datetime = Field(default_factory=_utcnow)
+    baseline_tokens: int
+    actual_tokens: int
+    multiplier: float
+
+    class Settings:
+        name = "spike_events"

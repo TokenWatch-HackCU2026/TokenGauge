@@ -1,50 +1,83 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-from sqlalchemy import func
 from typing import List
 
-from database import get_db
-from models import UsageRecord
-from schemas import UsageRecordCreate, UsageRecordOut, UsageSummary
+from beanie import PydanticObjectId
+from fastapi import APIRouter, HTTPException
+
+from models import ApiCall
+from schemas import ApiCallCreate, ApiCallOut, ApiCallSummary
 
 router = APIRouter(prefix="/usage", tags=["usage"])
 
-
-@router.post("/", response_model=UsageRecordOut)
-def log_usage(record: UsageRecordCreate, db: Session = Depends(get_db)):
-    db_record = UsageRecord(**record.model_dump())
-    db.add(db_record)
-    db.commit()
-    db.refresh(db_record)
-    return db_record
+# Placeholder user id used until auth is wired up
+_DEV_USER_ID = PydanticObjectId("000000000000000000000001")
 
 
-@router.get("/", response_model=List[UsageRecordOut])
-def get_usage(limit: int = 100, skip: int = 0, db: Session = Depends(get_db)):
-    return db.query(UsageRecord).order_by(UsageRecord.created_at.desc()).offset(skip).limit(limit).all()
+@router.post("/", response_model=ApiCallOut)
+async def log_usage(record: ApiCallCreate):
+    doc = ApiCall(user_id=_DEV_USER_ID, **record.model_dump())
+    await doc.insert()
+    return _to_out(doc)
 
 
-@router.get("/summary", response_model=List[UsageSummary])
-def get_summary(db: Session = Depends(get_db)):
-    rows = (
-        db.query(
-            UsageRecord.provider,
-            UsageRecord.model,
-            func.sum(UsageRecord.input_tokens).label("total_input_tokens"),
-            func.sum(UsageRecord.output_tokens).label("total_output_tokens"),
-            func.sum(UsageRecord.cost_usd).label("total_cost_usd"),
-            func.count(UsageRecord.id).label("request_count"),
-        )
-        .group_by(UsageRecord.provider, UsageRecord.model)
-        .all()
+@router.get("/", response_model=List[ApiCallOut])
+async def get_usage(limit: int = 100, skip: int = 0):
+    docs = (
+        await ApiCall.find(ApiCall.user_id == _DEV_USER_ID)
+        .sort(-ApiCall.timestamp)
+        .skip(skip)
+        .limit(limit)
+        .to_list()
     )
-    return [UsageSummary(**row._asdict()) for row in rows]
+    return [_to_out(d) for d in docs]
+
+
+@router.get("/summary", response_model=List[ApiCallSummary])
+async def get_summary():
+    pipeline = [
+        {"$match": {"user_id": _DEV_USER_ID}},
+        {
+            "$group": {
+                "_id": {"provider": "$provider", "model": "$model"},
+                "total_tokens_in": {"$sum": "$tokens_in"},
+                "total_tokens_out": {"$sum": "$tokens_out"},
+                "total_cost_usd": {"$sum": "$cost_usd"},
+                "request_count": {"$sum": 1},
+            }
+        },
+    ]
+    rows = await ApiCall.aggregate(pipeline).to_list()
+    return [
+        ApiCallSummary(
+            provider=r["_id"]["provider"],
+            model=r["_id"]["model"],
+            total_tokens_in=r["total_tokens_in"],
+            total_tokens_out=r["total_tokens_out"],
+            total_cost_usd=r["total_cost_usd"],
+            request_count=r["request_count"],
+        )
+        for r in rows
+    ]
 
 
 @router.delete("/{record_id}")
-def delete_record(record_id: int, db: Session = Depends(get_db)):
-    record = db.query(UsageRecord).filter(UsageRecord.id == record_id).first()
-    if record:
-        db.delete(record)
-        db.commit()
+async def delete_record(record_id: str):
+    doc = await ApiCall.get(record_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Record not found")
+    await doc.delete()
     return {"ok": True}
+
+
+def _to_out(doc: ApiCall) -> ApiCallOut:
+    return ApiCallOut(
+        id=str(doc.id),
+        user_id=str(doc.user_id),
+        provider=doc.provider,
+        model=doc.model,
+        tokens_in=doc.tokens_in,
+        tokens_out=doc.tokens_out,
+        cost_usd=doc.cost_usd,
+        latency_ms=doc.latency_ms,
+        app_tag=doc.app_tag,
+        timestamp=doc.timestamp,
+    )
