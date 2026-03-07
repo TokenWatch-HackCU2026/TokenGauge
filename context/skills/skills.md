@@ -8,62 +8,49 @@ Reusable implementation patterns and code conventions for the TokenWatch codebas
 
 **When to use**: Encrypting user AI provider keys before storage.
 
-```typescript
-import { KMSClient, GenerateDataKeyCommand, DecryptCommand } from '@aws-sdk/client-kms';
-import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+```python
+import os
+import base64
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import boto3
 
-const kms = new KMSClient({ region: process.env.AWS_REGION });
+kms = boto3.client("kms", region_name=os.environ["AWS_REGION"])
 
-// Encrypt a raw key for storage
-export async function encryptKey(rawKey: string): Promise<{ encryptedBlob: string; keyHint: string }> {
-  // 1. Ask KMS for a data key
-  const { Plaintext: dataKey, CiphertextBlob: encryptedDataKey } = await kms.send(
-    new GenerateDataKeyCommand({ KeyId: process.env.KMS_KEY_ID!, KeySpec: 'AES_256' })
-  );
 
-  // 2. Encrypt the raw key with the data key (AES-256-GCM)
-  const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', dataKey!, iv);
-  const encrypted = Buffer.concat([cipher.update(rawKey, 'utf8'), cipher.final()]);
-  const authTag = cipher.getAuthTag();
+def encrypt_key(raw_key: str) -> dict:
+    # 1. Ask KMS for a data key
+    response = kms.generate_data_key(KeyId=os.environ["KMS_KEY_ID"], KeySpec="AES_256")
+    data_key = response["Plaintext"]
+    encrypted_data_key = response["CiphertextBlob"]
 
-  // 3. Pack: [encryptedDataKey | iv | authTag | encrypted]
-  const blob = Buffer.concat([
-    Buffer.from(encryptedDataKey!),
-    iv,
-    authTag,
-    encrypted
-  ]).toString('base64');
+    # 2. Encrypt raw key with AES-256-GCM
+    aesgcm = AESGCM(data_key)
+    nonce = os.urandom(12)
+    ciphertext = aesgcm.encrypt(nonce, raw_key.encode(), None)
 
-  // Clear data key from memory
-  dataKey!.fill(0);
+    # 3. Pack: [encrypted_data_key | nonce | ciphertext]
+    blob = base64.b64encode(encrypted_data_key + nonce + ciphertext).decode()
 
-  return {
-    encryptedBlob: blob,
-    keyHint: rawKey.slice(-4),
-  };
-}
+    # Clear data key from memory
+    data_key = b"\x00" * len(data_key)
 
-// Decrypt a blob back to the raw key (in-memory only — never persist the result)
-export async function decryptKey(encryptedBlob: string): Promise<string> {
-  const buf = Buffer.from(encryptedBlob, 'base64');
-  // Note: encryptedDataKey is first 184 bytes for a 256-bit KMS key ciphertext
-  const encryptedDataKey = buf.slice(0, 184);
-  const iv = buf.slice(184, 196);
-  const authTag = buf.slice(196, 212);
-  const encrypted = buf.slice(212);
+    return {"encrypted_blob": blob, "key_hint": raw_key[-4:]}
 
-  const { Plaintext: dataKey } = await kms.send(
-    new DecryptCommand({ CiphertextBlob: encryptedDataKey, KeyId: process.env.KMS_KEY_ID! })
-  );
 
-  const decipher = createDecipheriv('aes-256-gcm', dataKey!, iv);
-  decipher.setAuthTag(authTag);
-  const rawKey = decipher.update(encrypted).toString('utf8') + decipher.final('utf8');
+def decrypt_key(encrypted_blob: str) -> str:
+    buf = base64.b64decode(encrypted_blob)
+    encrypted_data_key = buf[:184]
+    nonce = buf[184:196]
+    ciphertext = buf[196:]
 
-  dataKey!.fill(0); // Clear data key from memory
-  return rawKey;
-}
+    response = kms.decrypt(CiphertextBlob=encrypted_data_key, KeyId=os.environ["KMS_KEY_ID"])
+    data_key = response["Plaintext"]
+
+    aesgcm = AESGCM(data_key)
+    raw_key = aesgcm.decrypt(nonce, ciphertext, None).decode()
+
+    data_key = b"\x00" * len(data_key)  # clear from memory
+    return raw_key
 ```
 
 ---
@@ -72,98 +59,107 @@ export async function decryptKey(encryptedBlob: string): Promise<string> {
 
 **When to use**: Per-user quota enforcement in the proxy middleware.
 
-```typescript
-import Redis from 'ioredis';
+```python
+import time
+import aioredis
 
-const redis = new Redis(process.env.REDIS_URL!);
-
-// Lua script for atomic sliding window check
-const rateLimitScript = `
+RATE_LIMIT_SCRIPT = """
 local key = KEYS[1]
 local now = tonumber(ARGV[1])
 local window = tonumber(ARGV[2])
 local limit = tonumber(ARGV[3])
-local windowStart = now - window
+local window_start = now - window
 
-redis.call('ZREMRANGEBYSCORE', key, '-inf', windowStart)
+redis.call('ZREMRANGEBYSCORE', key, '-inf', window_start)
 local count = redis.call('ZCARD', key)
 
 if count >= limit then
-  return {0, count, windowStart + window}
+  return {0, count, window_start + window}
 end
 
 redis.call('ZADD', key, now, now .. math.random(1000000))
 redis.call('EXPIRE', key, math.ceil(window / 1000))
-return {1, count + 1, windowStart + window}
-`;
+return {1, count + 1, window_start + window}
+"""
 
-export async function checkRateLimit(
-  userId: string,
-  limit: number,
-  windowMs: number
-): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
-  const now = Date.now();
-  const key = `ratelimit:${userId}`;
-  const result = await redis.eval(rateLimitScript, 1, key, now, windowMs, limit) as number[];
-  return {
-    allowed: result[0] === 1,
-    remaining: Math.max(0, limit - result[1]),
-    resetAt: result[2],
-  };
-}
-```
 
----
-
-## JWT Middleware
-
-**When to use**: Protecting any Express route that requires authentication.
-
-```typescript
-import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-
-export interface AuthRequest extends Request {
-  user?: { userId: string; orgId: string; email: string };
-}
-
-export function requireAuth(req: AuthRequest, res: Response, next: NextFunction) {
-  const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Missing authorization header' });
-  }
-
-  try {
-    const token = header.slice(7);
-    const payload = jwt.verify(token, process.env.JWT_SECRET!) as any;
-    req.user = { userId: payload.sub, orgId: payload.orgId, email: payload.email };
-    next();
-  } catch {
-    return res.status(401).json({ error: 'Invalid or expired token' });
-  }
-}
-```
-
----
-
-## Zod Request Validation Middleware
-
-**When to use**: Validating request bodies on any route.
-
-```typescript
-import { Request, Response, NextFunction } from 'express';
-import { ZodSchema } from 'zod';
-
-export function validate(schema: ZodSchema) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const result = schema.safeParse(req.body);
-    if (!result.success) {
-      return res.status(400).json({ error: 'Validation failed', details: result.error.flatten() });
+async def check_rate_limit(redis: aioredis.Redis, user_id: str, limit: int, window_ms: int) -> dict:
+    now = int(time.time() * 1000)
+    key = f"ratelimit:{user_id}"
+    result = await redis.eval(RATE_LIMIT_SCRIPT, 1, key, now, window_ms, limit)
+    return {
+        "allowed": result[0] == 1,
+        "remaining": max(0, limit - result[1]),
+        "reset_at": result[2],
     }
-    req.body = result.data;
-    next();
-  };
-}
+```
+
+---
+
+## JWT Auth Dependency (FastAPI)
+
+**When to use**: Protecting any FastAPI route that requires authentication.
+
+```python
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from jose import JWTError, jwt
+import os
+
+bearer_scheme = HTTPBearer()
+
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> dict:
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=["HS256"])
+        return {
+            "user_id": payload["sub"],
+            "org_id": payload.get("org_id"),
+            "email": payload.get("email"),
+        }
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+```
+
+Usage on a route:
+
+```python
+@router.get("/me")
+async def get_me(user: dict = Depends(get_current_user)):
+    return user
+```
+
+---
+
+## Pydantic Request Validation
+
+**When to use**: Validating request bodies — FastAPI handles this automatically via Pydantic models.
+
+```python
+from pydantic import BaseModel, EmailStr, field_validator
+from typing import Literal
+
+
+class RegisterKeyRequest(BaseModel):
+    provider: Literal["anthropic", "openai", "google", "mistral"]
+    api_key: str
+
+    @field_validator("api_key")
+    @classmethod
+    def key_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("api_key must not be empty")
+        return v
+
+
+# FastAPI validates automatically:
+@router.post("/keys")
+async def register_key(body: RegisterKeyRequest, user=Depends(get_current_user)):
+    ...
 ```
 
 ---
@@ -172,76 +168,75 @@ export function validate(schema: ZodSchema) {
 
 **When to use**: Dashboard usage data endpoints.
 
-```typescript
-import { ApiCall } from '../models/ApiCall';
+```python
+from motor.motor_asyncio import AsyncIOMotorCollection
+from datetime import datetime
 
-export async function getUsageSummary(
-  userId: string,
-  startDate: Date,
-  endDate: Date,
-  groupBy: 'hour' | 'day' = 'day'
-) {
-  const dateFormat = groupBy === 'hour' ? '%Y-%m-%dT%H:00:00Z' : '%Y-%m-%d';
 
-  return ApiCall.aggregate([
-    {
-      $match: {
-        userId,
-        timestamp: { $gte: startDate, $lte: endDate },
-      },
-    },
-    {
-      $group: {
-        _id: {
-          date: { $dateToString: { format: dateFormat, date: '$timestamp' } },
-          provider: '$provider',
-          model: '$model',
+async def get_usage_summary(
+    collection: AsyncIOMotorCollection,
+    user_id: str,
+    start_date: datetime,
+    end_date: datetime,
+    group_by: str = "day",
+) -> list:
+    date_format = "%Y-%m-%dT%H:00:00Z" if group_by == "hour" else "%Y-%m-%d"
+
+    pipeline = [
+        {"$match": {"user_id": user_id, "timestamp": {"$gte": start_date, "$lte": end_date}}},
+        {
+            "$group": {
+                "_id": {
+                    "date": {"$dateToString": {"format": date_format, "date": "$timestamp"}},
+                    "provider": "$provider",
+                    "model": "$model",
+                },
+                "total_tokens_in": {"$sum": "$tokens_in"},
+                "total_tokens_out": {"$sum": "$tokens_out"},
+                "total_cost_usd": {"$sum": "$cost_usd"},
+                "request_count": {"$sum": 1},
+                "avg_latency_ms": {"$avg": "$latency_ms"},
+            }
         },
-        totalTokensIn: { $sum: '$tokensIn' },
-        totalTokensOut: { $sum: '$tokensOut' },
-        totalCostUsd: { $sum: '$costUsd' },
-        requestCount: { $sum: 1 },
-        avgLatencyMs: { $avg: '$latencyMs' },
-      },
-    },
-    { $sort: { '_id.date': 1 } },
-  ]);
-}
+        {"$sort": {"_id.date": 1}},
+    ]
+
+    return await collection.aggregate(pipeline).to_list(None)
 ```
 
 ---
 
-## BullMQ Job Queue
+## arq Job Queue
 
 **When to use**: Async alert delivery, webhook dispatch, usage summarization.
 
-```typescript
-import { Queue, Worker } from 'bullmq';
-import Redis from 'ioredis';
+```python
+import httpx
+from arq import create_pool
+from arq.connections import RedisSettings
 
-const connection = new Redis(process.env.REDIS_URL!, { maxRetriesPerRequest: null });
 
-// Define queues
-export const alertQueue = new Queue('alerts', { connection });
-export const webhookQueue = new Queue('webhooks', { connection });
+# Define worker functions
+async def deliver_webhook(ctx, url: str, payload: dict):
+    async with httpx.AsyncClient() as client:
+        await client.post(url, json=payload, timeout=5.0)
 
-// Enqueue a webhook delivery job
-export async function enqueueWebhook(payload: WebhookPayload) {
-  await webhookQueue.add('deliver', payload, {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 2000 },
-  });
-}
 
-// Worker (run in separate process or worker thread)
-const webhookWorker = new Worker(
-  'webhooks',
-  async (job) => {
-    const { url, payload } = job.data;
-    await axios.post(url, payload, { timeout: 5000 });
-  },
-  { connection }
-);
+async def send_sms_alert(ctx, user_id: str, message: str):
+    # Twilio SMS via ctx["twilio"]
+    ...
+
+
+# Worker settings
+class WorkerSettings:
+    functions = [deliver_webhook, send_sms_alert]
+    redis_settings = RedisSettings.from_dsn("redis://localhost:6379")
+    max_tries = 3
+
+
+# Enqueue from the API
+async def enqueue_webhook(redis, url: str, payload: dict):
+    await redis.enqueue_job("deliver_webhook", url, payload)
 ```
 
 ---
@@ -250,26 +245,35 @@ const webhookWorker = new Worker(
 
 **When to use**: Adding new AI provider support to the gateway.
 
-```typescript
-export interface ProviderRequest {
-  model: string;
-  messages: Array<{ role: string; content: string }>;
-  maxTokens?: number;
-  temperature?: number;
-}
+```python
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Any
 
-export interface ProviderResponse {
-  content: string;
-  tokensIn: number;
-  tokensOut: number;
-  model: string;
-  rawResponse: unknown;
-}
 
-export interface IProviderAdapter {
-  provider: string;
-  forward(request: ProviderRequest, apiKey: string): Promise<ProviderResponse>;
-}
+@dataclass
+class ProviderRequest:
+    model: str
+    messages: list[dict]
+    max_tokens: int | None = None
+    temperature: float | None = None
+
+
+@dataclass
+class ProviderResponse:
+    content: str
+    tokens_in: int
+    tokens_out: int
+    model: str
+    raw_response: Any
+
+
+class IProviderAdapter(ABC):
+    provider: str
+
+    @abstractmethod
+    async def forward(self, request: ProviderRequest, api_key: str) -> ProviderResponse:
+        ...
 ```
 
 ---
@@ -278,21 +282,22 @@ export interface IProviderAdapter {
 
 **When to use**: After every proxy response to calculate USD cost.
 
-```typescript
-const PRICING: Record<string, { input: number; output: number }> = {
-  'claude-3-haiku':        { input: 0.25,  output: 1.25  },
-  'claude-3-5-sonnet':     { input: 3.00,  output: 15.00 },
-  'gpt-4o-mini':           { input: 0.15,  output: 0.60  },
-  'gpt-4o':                { input: 5.00,  output: 15.00 },
-  'gemini-1.5-flash':      { input: 0.075, output: 0.30  },
-  'gemini-1.5-pro':        { input: 3.50,  output: 10.50 },
-  'mistral-small':         { input: 1.00,  output: 3.00  },
-  'mistral-large':         { input: 8.00,  output: 24.00 },
-};
-
-export function calculateCost(model: string, tokensIn: number, tokensOut: number): number {
-  const price = PRICING[model];
-  if (!price) return 0;
-  return (tokensIn / 1_000_000) * price.input + (tokensOut / 1_000_000) * price.output;
+```python
+PRICING: dict[str, dict[str, float]] = {
+    "claude-3-haiku":    {"input": 0.25,  "output": 1.25},
+    "claude-3-5-sonnet": {"input": 3.00,  "output": 15.00},
+    "gpt-4o-mini":       {"input": 0.15,  "output": 0.60},
+    "gpt-4o":            {"input": 5.00,  "output": 15.00},
+    "gemini-1.5-flash":  {"input": 0.075, "output": 0.30},
+    "gemini-1.5-pro":    {"input": 3.50,  "output": 10.50},
+    "mistral-small":     {"input": 1.00,  "output": 3.00},
+    "mistral-large":     {"input": 8.00,  "output": 24.00},
 }
+
+
+def calculate_cost(model: str, tokens_in: int, tokens_out: int) -> float:
+    price = PRICING.get(model)
+    if not price:
+        return 0.0
+    return (tokens_in / 1_000_000) * price["input"] + (tokens_out / 1_000_000) * price["output"]
 ```

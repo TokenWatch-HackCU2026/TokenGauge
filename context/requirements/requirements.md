@@ -92,7 +92,7 @@
 - NFR-S3: Every KMS decryption event is audit-logged
 - NFR-S4: All traffic over TLS 1.3
 - NFR-S5: JWT access tokens expire after 15 minutes; refresh tokens after 7 days
-- NFR-S6: Passwords hashed with bcrypt (min cost factor 12)
+- NFR-S6: Passwords hashed with bcrypt via passlib (min cost factor 12)
 
 ### Performance
 - NFR-P1: Proxy overhead must add < 50ms p99 latency to provider requests
@@ -112,7 +112,7 @@
 ### Developer Experience
 - NFR-DX1: OpenAPI spec for all proxy and management endpoints
 - NFR-DX2: SDK-compatible — proxy endpoints mirror provider API shapes
-- NFR-DX3: Docker compose for local development (app + MongoDB + Redis)
+- NFR-DX3: Docker compose for local development (api + frontend + MongoDB + Redis)
 
 ---
 
