@@ -45,6 +45,12 @@ async def connect_db() -> None:
     raise RuntimeError("Could not connect to MongoDB after %d attempts" % retries)
 
 
+def get_db():
+    if _client is None:
+        raise RuntimeError("Database not connected")
+    return _client[DB_NAME]
+
+
 async def disconnect_db() -> None:
     global _client
     if _client:

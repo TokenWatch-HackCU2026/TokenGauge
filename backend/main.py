@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import connect_db, disconnect_db
-from routers import auth, usage
+from routers import auth, usage, dashboard
 
 from redis.client import connect_redis, disconnect_redis, redis_health_check
 
@@ -36,6 +36,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(usage.router)
+app.include_router(dashboard.router)
 
 
 @app.get("/health")
