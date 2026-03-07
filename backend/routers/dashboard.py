@@ -3,17 +3,15 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Literal, Optional
 
 from beanie import PydanticObjectId
-from fastapi import APIRouter, Query
+from bson import ObjectId
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from auth import get_current_user
 from database import get_db
-from models import ApiCall
 from redis_client import cache_get, cache_set, make_cache_key
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
-
-# Dev user — swapped for Depends(get_current_user) once auth is wired in
-_DEV_USER_ID = PydanticObjectId("000000000000000000000001")
 
 DEFAULT_WINDOW_DAYS = 7
 QUOTA_LIMIT = 1_000_000
@@ -63,7 +61,7 @@ def _default_range() -> tuple[datetime, datetime]:
 
 
 def _build_match(
-    user_id: PydanticObjectId,
+    user_id: ObjectId,
     start: datetime,
     end: datetime,
     provider: str | None = None,
@@ -89,10 +87,11 @@ async def get_summary(
     provider: Optional[str] = None,
     model: Optional[str] = None,
     app_tag: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
 ):
-    uid = _DEV_USER_ID
+    uid = ObjectId(current_user["user_id"])
     start, end = (start_date, end_date) if start_date and end_date else _default_range()
-    ck = make_cache_key(str(uid), "summary", str(start), str(end), provider or "", model or "", app_tag or "")
+    ck = make_cache_key(current_user["user_id"], "summary", str(start), str(end), provider or "", model or "", app_tag or "")
 
     if cached := await cache_get(ck):
         return SummaryOut(**cached)
@@ -132,10 +131,11 @@ async def get_timeseries(
     group_by: Literal["hour", "day"] = "day",
     provider: Optional[str] = None,
     model: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
 ):
-    uid = _DEV_USER_ID
+    uid = ObjectId(current_user["user_id"])
     start, end = (start_date, end_date) if start_date and end_date else _default_range()
-    ck = make_cache_key(str(uid), "timeseries", str(start), str(end), group_by, provider or "", model or "")
+    ck = make_cache_key(current_user["user_id"], "timeseries", str(start), str(end), group_by, provider or "", model or "")
 
     if cached := await cache_get(ck):
         return [TimeseriesPoint(**p) for p in cached]
@@ -166,10 +166,11 @@ async def get_timeseries(
 async def get_breakdown(
     start_date: Optional[datetime] = Query(default=None),
     end_date: Optional[datetime] = Query(default=None),
+    current_user: dict = Depends(get_current_user),
 ):
-    uid = _DEV_USER_ID
+    uid = ObjectId(current_user["user_id"])
     start, end = (start_date, end_date) if start_date and end_date else _default_range()
-    ck = make_cache_key(str(uid), "breakdown", str(start), str(end))
+    ck = make_cache_key(current_user["user_id"], "breakdown", str(start), str(end))
 
     if cached := await cache_get(ck):
         return [BreakdownRow(**r) for r in cached]
@@ -196,8 +197,8 @@ async def get_breakdown(
 
 
 @router.get("/quota", response_model=QuotaOut)
-async def get_quota():
-    uid = str(_DEV_USER_ID)
+async def get_quota(current_user: dict = Depends(get_current_user)):
+    uid = current_user["user_id"]
     now_ms = int(time.time() * 1000)
     used = 0
 

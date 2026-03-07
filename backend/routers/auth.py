@@ -62,7 +62,7 @@ async def login(body: LoginRequest):
     if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     access, refresh = await _issue_tokens(user)
-    return {"access_token": access, "refresh_token": refresh, "expires_in": 900}
+    return {"access_token": access, "refresh_token": refresh, "expires_in": 900, "user": _user_out(user)}
 
 
 @router.post("/refresh")

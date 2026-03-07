@@ -11,6 +11,52 @@ async function get<T>(path: string): Promise<T> {
   return res.json();
 }
 
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(BASE + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? res.statusText);
+  }
+  return res.json();
+}
+
+// ── Auth types & endpoints ────────────────────────────────────────────────────
+
+export interface UserOut {
+  id: string;
+  email: string;
+  full_name: string | null;
+  avatar_url: string | null;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  refresh_token: string;
+  user?: UserOut;
+}
+
+export function login(email: string, password: string): Promise<AuthResponse> {
+  return post("/api/v1/auth/login", { email, password });
+}
+
+export function register(email: string, password: string, full_name?: string): Promise<AuthResponse> {
+  return post("/api/v1/auth/register", { email, password, full_name });
+}
+
+export async function logout(): Promise<void> {
+  const refresh_token = localStorage.getItem("refresh_token");
+  if (refresh_token) {
+    await post("/api/v1/auth/logout", { refresh_token }).catch(() => {});
+  }
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface ApiCall {
