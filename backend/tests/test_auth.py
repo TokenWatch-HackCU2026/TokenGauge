@@ -94,7 +94,7 @@ class TestLogin:
 
     def test_login_unknown_email_401(self, client):
         res = client.post(f"{AUTH}/login", json={
-            "email": "nobody@nowhere.test",
+            "email": "nobody@nowhere.example.com",
             "password": "SomePass123!",
         })
         assert res.status_code == 401

@@ -115,13 +115,14 @@ class TestGetUsage:
         assert len(res.json()) <= 2
 
     def test_get_usage_skip_param(self, client):
-        all_res = client.get(f"{USAGE}/")
-        skip_res = client.get(f"{USAGE}/", params={"skip": 1})
-        assert res.status_code == 200 if (res := skip_res) else True
+        all_res = client.get(f"{USAGE}/", params={"limit": 5})
+        skip_res = client.get(f"{USAGE}/", params={"limit": 5, "skip": 1})
         assert skip_res.status_code == 200
-        # Skipped list should be shorter than full list (assuming >1 record exists)
-        if len(all_res.json()) > 1:
-            assert len(skip_res.json()) < len(all_res.json())
+        all_records = all_res.json()
+        skip_records = skip_res.json()
+        # With enough records, skip=1 should shift results: record[1] of all == record[0] of skipped
+        if len(all_records) > 1 and len(skip_records) > 0:
+            assert all_records[1]["id"] == skip_records[0]["id"]
 
     def test_get_usage_ordered_by_timestamp_desc(self, client):
         # Post two records back to back

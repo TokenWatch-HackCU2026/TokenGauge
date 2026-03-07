@@ -36,7 +36,11 @@ class User(Document):
         name = "users"
         indexes = [
             pymongo.IndexModel([("email", pymongo.ASCENDING)], unique=True),
-            pymongo.IndexModel([("google_id", pymongo.ASCENDING)], unique=True, sparse=True),
+            pymongo.IndexModel(
+                [("google_id", pymongo.ASCENDING)],
+                unique=True,
+                partialFilterExpression={"google_id": {"$type": "string"}},
+            ),
         ]
 
 

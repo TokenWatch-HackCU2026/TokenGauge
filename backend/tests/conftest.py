@@ -20,7 +20,7 @@ def client():
 @pytest.fixture(scope="session")
 def unique_email():
     """One-time unique email so parallel runs don't collide."""
-    return f"test_{uuid.uuid4().hex[:8]}@tokenwatch.test"
+    return f"test_{uuid.uuid4().hex[:8]}@example.com"
 
 
 @pytest.fixture(scope="session")
