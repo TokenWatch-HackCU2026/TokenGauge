@@ -26,7 +26,6 @@ class UserOut(BaseModel):
 
     id: str
     email: str
-    org_id: Optional[str] = None
     full_name: Optional[str] = None
     avatar_url: Optional[str] = None
     phone: Optional[str] = None
