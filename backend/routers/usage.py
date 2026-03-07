@@ -3,6 +3,7 @@ from typing import List
 from beanie import PydanticObjectId
 from fastapi import APIRouter, HTTPException
 
+from database import get_db
 from models import ApiCall
 from schemas import ApiCallCreate, ApiCallOut, ApiCallSummary
 
@@ -45,7 +46,7 @@ async def get_summary():
             }
         },
     ]
-    rows = await ApiCall.aggregate(pipeline).to_list()
+    rows = await get_db()["api_calls"].aggregate(pipeline).to_list(None)
     return [
         ApiCallSummary(
             provider=r["_id"]["provider"],

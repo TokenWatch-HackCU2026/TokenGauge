@@ -8,3 +8,4 @@ httpx
 passlib[bcrypt]
 python-jose[cryptography]
 pymongo
+redis[asyncio]
