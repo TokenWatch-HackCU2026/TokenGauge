@@ -7,20 +7,19 @@ All endpoints are prefixed with `/api/v1`. Protected routes require `Authorizati
 ## Auth
 
 ### `POST /auth/register`
-Register a new user and create an organization.
+Register a new user with email and password.
 
 **Request**
 ```json
 {
   "email": "user@example.com",
-  "password": "...",
-  "org_name": "My Company"
+  "password": "..."
 }
 ```
 **Response `201`**
 ```json
 {
-  "user": { "id": "...", "email": "...", "org_id": "..." },
+  "user": { "id": "...", "email": "..." },
   "access_token": "...",
   "refresh_token": "..."
 }
@@ -91,7 +90,8 @@ Get the authenticated user's profile. 🔒 Protected.
 {
   "id": "...",
   "email": "...",
-  "org_id": "...",
+  "full_name": "...",
+  "avatar_url": "...",
   "phone": "+1...",
   "created_at": "2026-03-07T00:00:00Z"
 }
@@ -112,34 +112,22 @@ Update the authenticated user's profile. 🔒 Protected.
 
 ---
 
-## Organizations
+### `GET /auth/google`
+Redirect to Google OAuth consent screen. Returns a redirect to Google.
 
-### `GET /orgs/me`
-Get the authenticated user's organization. 🔒 Protected.
+---
+
+### `GET /auth/google/callback`
+Google OAuth callback. Exchanges code for tokens and returns JWT pair.
 
 **Response `200`**
 ```json
 {
-  "id": "...",
-  "name": "My Company",
-  "plan": "free",
-  "owner_id": "...",
-  "created_at": "..."
+  "user": { "id": "...", "email": "...", "full_name": "...", "avatar_url": "..." },
+  "access_token": "...",
+  "refresh_token": "..."
 }
 ```
-
----
-
-### `PATCH /orgs/me`
-Update the organization name. 🔒 Protected.
-
-**Request**
-```json
-{
-  "name": "New Org Name"
-}
-```
-**Response `200`** — Updated org object.
 
 ---
 

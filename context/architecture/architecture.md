@@ -2,7 +2,7 @@
 
 ## Overview
 
-TokenWatch is a multi-tenant SaaS AI gateway and usage intelligence platform. All AI provider traffic routes through the TokenWatch proxy, enabling unified logging, cost tracking, key security, rate limiting, and model optimization.
+TokenWatch is a SaaS AI gateway and usage intelligence platform. All AI provider traffic routes through the TokenWatch proxy, enabling unified logging, cost tracking, key security, rate limiting, and model optimization.
 
 ```
 User App → TokenWatch Proxy → AI Provider (Anthropic / OpenAI / Google / Mistral)
@@ -31,7 +31,7 @@ User App → TokenWatch Proxy → AI Provider (Anthropic / OpenAI / Google / Mis
 ### 2. Auth System
 - JWT-based authentication (access token + refresh token)
 - User registration, login, logout endpoints
-- Organization (multi-tenant) support — users belong to orgs
+- Google OAuth support
 - Middleware validates JWT on all protected routes
 
 ### 3. API Key Vault
@@ -43,11 +43,10 @@ User App → TokenWatch Proxy → AI Provider (Anthropic / OpenAI / Google / Mis
 
 ### 4. Usage Database (MongoDB)
 Collections:
-- `users` — id, email, passwordHash, orgId, createdAt
-- `orgs` — id, name, plan, ownerId, createdAt
+- `users` — id, email, password_hash, full_name, avatar_url, phone, google_id, refresh_token_hash, created_at, updated_at
 - `api_keys` — id, userId, provider, encryptedBlob, keyHint, createdAt
-- `api_calls` — id, userId, orgId, provider, model, tokensIn, tokensOut, costUsd, latencyMs, appTag, timestamp
-- `usage_summaries` — aggregated daily/weekly rollups per user/org
+- `api_calls` — id, userId, provider, model, tokensIn, tokensOut, costUsd, latencyMs, appTag, timestamp
+- `usage_summaries` — aggregated daily/weekly rollups per user
 - `alerts` — id, userId, type (limit/spike), threshold, triggeredAt, acknowledged
 - `spike_events` — id, userId, detectedAt, baselineTokens, actualTokens, multiplier
 
