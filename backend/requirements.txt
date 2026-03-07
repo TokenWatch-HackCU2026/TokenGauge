@@ -8,3 +8,5 @@ httpx
 passlib[bcrypt]
 python-jose[cryptography]
 pymongo
+aioredis
+arq
