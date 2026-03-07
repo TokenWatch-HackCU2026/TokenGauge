@@ -2,25 +2,25 @@
 
 ## Core Stack
 
-### Node.js + Express (TypeScript)
+### Python + FastAPI
 - **Purpose**: API server, proxy gateway
-- **Key packages**: `express`, `typescript`, `ts-node`, `@types/express`
-- **Pattern**: Middleware-based request pipeline; modular routes in `src/routes/`
+- **Key packages**: `fastapi`, `uvicorn`, `pydantic`, `python-dotenv`
+- **Pattern**: Dependency injection via `Depends()`; modular routers in `app/routers/`
 
-### Next.js 14
+### React + Vite
 - **Purpose**: Dashboard frontend
-- **Key packages**: `next`, `react`, `react-dom`, `tailwindcss`
-- **Pattern**: App Router (`/app` dir), server components for initial data, client components for charts/interactivity
+- **Key packages**: `react`, `react-dom`, `vite`, `tailwindcss`
+- **Pattern**: SPA with React Router; server state via TanStack Query; client components for charts/interactivity
 
-### MongoDB + Mongoose
+### MongoDB + Motor
 - **Purpose**: Primary data store (users, orgs, api_keys, api_calls, usage_summaries, alerts)
-- **Key packages**: `mongoose`, `@types/mongoose`
-- **Connection**: `MONGODB_URI` env var; connection pooling via Mongoose
+- **Key packages**: `motor`, `beanie` (ODM)
+- **Connection**: `MONGODB_URI` env var; async connection via Motor
 - **Indexes**: `api_calls` must have compound indexes on `{ userId, timestamp }`, `{ userId, provider }`, `{ userId, model }`
 
-### Redis + ioredis
-- **Purpose**: Rate limit counters, session cache, dashboard cache, BullMQ backing store
-- **Key packages**: `ioredis`, `bullmq`
+### Redis + aioredis
+- **Purpose**: Rate limit counters, session cache, dashboard cache, arq backing store
+- **Key packages**: `aioredis`, `arq`
 - **Connection**: `REDIS_URL` env var
 - **Key naming conventions**:
   - `ratelimit:{userId}` — sorted set for sliding window
@@ -33,27 +33,27 @@
 
 ### AWS KMS (Key Management Service)
 - **Purpose**: Master key for envelope encryption of user API keys
-- **Key packages**: `@aws-sdk/client-kms`
+- **Key packages**: `boto3`
 - **Pattern**: GenerateDataKey → encrypt locally with AES-256-GCM → store encrypted data key + ciphertext
 - **Required env vars**: `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `KMS_KEY_ID`
 - **Reference**: See `skills/skills.md` for full implementation
 
-### jsonwebtoken + bcrypt
+### python-jose + passlib
 - **Purpose**: JWT auth tokens + password hashing
-- **Key packages**: `jsonwebtoken`, `bcrypt`, `@types/bcrypt`
+- **Key packages**: `python-jose[cryptography]`, `passlib[bcrypt]`
 - **Config**: Access token 15m expiry, refresh token 7d expiry, bcrypt cost factor 12
 
-### zod
-- **Purpose**: Runtime request validation + TypeScript type inference
-- **Key packages**: `zod`
-- **Pattern**: Define schema, use `validate()` middleware, `safeParse` for non-throw validation
+### Pydantic
+- **Purpose**: Runtime request validation + Python type enforcement
+- **Key packages**: `pydantic` (bundled with FastAPI)
+- **Pattern**: Define models as `BaseModel` subclasses; FastAPI validates request bodies automatically
 
 ---
 
 ## AI Provider SDKs
 
 ### Anthropic
-- **Package**: `@anthropic-ai/sdk`
+- **Package**: `anthropic`
 - **Base URL**: `https://api.anthropic.com`
 - **Auth header**: `x-api-key: {key}`
 - **Token fields**: `response.usage.input_tokens`, `response.usage.output_tokens`
@@ -65,12 +65,12 @@
 - **Token fields**: `response.usage.prompt_tokens`, `response.usage.completion_tokens`
 
 ### Google Generative AI (Gemini)
-- **Package**: `@google/generative-ai`
+- **Package**: `google-generativeai`
 - **Auth**: API key as query param or header
-- **Token fields**: `response.usageMetadata.promptTokenCount`, `response.usageMetadata.candidatesTokenCount`
+- **Token fields**: `response.usage_metadata.prompt_token_count`, `response.usage_metadata.candidates_token_count`
 
 ### Mistral
-- **Package**: `@mistralai/mistralai`
+- **Package**: `mistralai`
 - **Base URL**: `https://api.mistral.ai/v1`
 - **Auth header**: `Authorization: Bearer {key}`
 - **Token fields**: `response.usage.prompt_tokens`, `response.usage.completion_tokens`
@@ -79,15 +79,15 @@
 
 ## Async / Queue
 
-### BullMQ
+### arq
 - **Purpose**: Job queues for alerts, webhooks, usage summarization, spike detection
-- **Key packages**: `bullmq`
+- **Key packages**: `arq`
 - **Queues**:
   - `alerts` — SMS alert jobs (Twilio)
   - `webhooks` — User webhook delivery jobs
   - `usage-summaries` — Weekly aggregation jobs
   - `spike-detection` — Hourly spike check jobs
-- **Pattern**: See `skills/skills.md` for BullMQ setup
+- **Pattern**: See `skills/skills.md` for arq worker setup
 
 ---
 
@@ -118,7 +118,7 @@
 
 ### react-hook-form + zod
 - **Purpose**: Form validation (key registration, user settings)
-- **Key packages**: `react-hook-form`, `@hookform/resolvers`
+- **Key packages**: `react-hook-form`, `@hookform/resolvers`, `zod`
 
 ---
 
@@ -126,17 +126,17 @@
 
 ### Docker + docker-compose
 - **Purpose**: Local development environment
-- **Services**: `app` (Express API), `frontend` (Next.js), `mongo`, `redis`
+- **Services**: `api` (FastAPI + uvicorn), `frontend` (React + Vite), `mongo`, `redis`
 - **File**: `docker-compose.yml` at repo root
 
-### Jest + Supertest
+### pytest + httpx
 - **Purpose**: Unit and integration tests
-- **Key packages**: `jest`, `supertest`, `@types/jest`, `ts-jest`
-- **Test DB**: In-memory MongoDB via `mongodb-memory-server`
+- **Key packages**: `pytest`, `pytest-asyncio`, `httpx`
+- **Test DB**: In-memory MongoDB via `mongomock-motor`
 
-### ESLint + Prettier
-- **Purpose**: Code quality and formatting
-- **Config**: `.eslintrc.json`, `.prettierrc` at repo root
+### ruff + black
+- **Purpose**: Linting and formatting
+- **Config**: `pyproject.toml` at repo root
 
 ---
 

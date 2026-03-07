@@ -70,13 +70,13 @@ Collections:
 
 | Layer | Technology |
 |-------|-----------|
-| API Server | Node.js + Express (TypeScript) |
-| Frontend | Next.js + React + Tailwind CSS |
+| API Server | Python + FastAPI |
+| Frontend | React + Vite + Tailwind CSS |
 | Primary DB | MongoDB (Atlas or self-hosted) |
-| Cache / Queue | Redis + BullMQ |
+| Cache / Queue | Redis + arq |
 | Key Management | AWS KMS (envelope encryption) |
-| Auth | JWT (jsonwebtoken) + bcrypt |
-| Proxy | Axios / node-fetch for provider forwarding |
+| Auth | JWT (python-jose) + passlib[bcrypt] |
+| Proxy | httpx (async) for provider forwarding |
 | Containerization | Docker + docker-compose |
 | Cost Calculation | Static pricing table per provider/model |
 

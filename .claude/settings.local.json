@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git remote rename token_watch origin && git push -u origin main)",
+      "Bash(git pull origin main --rebase && git push -u origin main)",
+      "Bash(git check-ignore -v context/memory/memory.md context/prompts/prompts.md context/agents/agents.md)"
+    ]
+  }
+}
