@@ -520,9 +520,8 @@ function fmtNum(n: number): string {
 
 function fmtCost(v: number): string {
   if (v === 0) return "$0.00";
-  const s = v.toPrecision(20).replace(/\.?0+$/, "");
-  const [int, dec] = s.split(".");
-  if (!dec) return `$${int}.00`;
-  const trimmed = dec.length <= 2 ? dec.padEnd(2, "0") : dec;
-  return `$${int}.${trimmed}`;
+  if (v >= 1) return `$${v.toFixed(2)}`;
+  if (v >= 0.01) return `$${v.toFixed(4)}`;
+  const decimals = -Math.floor(Math.log10(v)) + 1;
+  return `~$${v.toFixed(decimals)}`;
 }
