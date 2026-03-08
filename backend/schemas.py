@@ -49,11 +49,15 @@ class ApiCallCreate(BaseModel):
     latency_ms: int
     app_tag: Optional[str] = None
     key_hint: Optional[str] = None
+    prompt_type: Optional[str] = None
+    complexity: Optional[int] = None
 
 
 class ApiCallOut(ApiCallCreate):
     id: str
     user_id: str
+    prompt_type: Optional[str] = None
+    complexity: Optional[int] = None
     timestamp: datetime
 
     class Config:

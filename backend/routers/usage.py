@@ -155,5 +155,7 @@ def _to_out(doc: ApiCall) -> ApiCallOut:
         latency_ms=doc.latency_ms,
         app_tag=doc.app_tag,
         key_hint=doc.key_hint,
+        prompt_type=doc.prompt_type,
+        complexity=doc.complexity,
         timestamp=doc.timestamp,
     )

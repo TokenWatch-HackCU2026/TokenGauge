@@ -9,6 +9,7 @@ API keys stay with the user, nothing is proxied.
 from __future__ import annotations
 
 import inspect
+import re
 import threading
 import time
 from typing import Any
@@ -126,6 +127,146 @@ def _calc_cost(model: str, tokens_in: int, tokens_out: int) -> float:
     return (tokens_in / 1_000_000) * price["input"] + (tokens_out / 1_000_000) * price["output"]
 
 
+# ── Prompt Classification ─────────────────────────────────────────────────────
+# Runs locally in the SDK — raw prompt text is NEVER sent to TokenGauge.
+
+_PROMPT_TYPES = (
+    "code", "chat", "summarization", "analysis",
+    "creative", "extraction", "translation", "other",
+)
+
+# Patterns checked in priority order; first match wins.
+_CLASSIFICATION_RULES: list[tuple[str, re.Pattern[str]]] = [
+    ("code", re.compile(
+        r"```"                            # code fences
+        r"|write (?:a |the )?(?:function|class|script|program|code|test|module)"
+        r"|fix (?:this |the )?(?:bug|error|code|issue)"
+        r"|refactor"
+        r"|debug"
+        r"|implement"
+        r"|(?:python|javascript|typescript|java|rust|go|c\+\+|sql|html|css|bash|shell)\b",
+        re.IGNORECASE,
+    )),
+    ("translation", re.compile(
+        r"\btranslat(?:e|ion)\b"
+        r"|(?:in|to|into) (?:spanish|french|german|chinese|japanese|korean|portuguese|italian|russian|arabic|hindi|english)\b",
+        re.IGNORECASE,
+    )),
+    ("summarization", re.compile(
+        r"\bsummari[sz]e\b"
+        r"|\bsummary\b"
+        r"|\btl;?dr\b"
+        r"|\bkey (?:points|takeaways)\b"
+        r"|\bcondense\b"
+        r"|\bbrief (?:overview|recap)\b",
+        re.IGNORECASE,
+    )),
+    ("extraction", re.compile(
+        r"\bextract\b"
+        r"|\bparse\b"
+        r"|\blist (?:the|all)\b"
+        r"|\bpull out\b"
+        r"|\b(?:convert|format) (?:to|into|as) (?:json|csv|xml|yaml|table)\b",
+        re.IGNORECASE,
+    )),
+    ("analysis", re.compile(
+        r"\banaly[sz]e\b"
+        r"|\banalysis\b"
+        r"|\bcompare\b"
+        r"|\bevaluat(?:e|ion)\b"
+        r"|\bpros (?:and|&) cons\b"
+        r"|\bbreak ?down\b"
+        r"|\bassess\b"
+        r"|\bexplain (?:why|how)\b",
+        re.IGNORECASE,
+    )),
+    ("creative", re.compile(
+        r"\bwrite (?:a |the )?(?:story|poem|essay|blog|article|song|script|novel|email)\b"
+        r"|\bbrainstorm\b"
+        r"|\bcreative\b"
+        r"|\bimagine\b"
+        r"|\bgenerate (?:a |the )?(?:story|idea|name|title|slogan|tagline)\b",
+        re.IGNORECASE,
+    )),
+]
+
+
+def _extract_text(messages: Any) -> str:
+    """Pull plaintext from messages in any supported provider format."""
+    if isinstance(messages, str):
+        return messages
+    if not isinstance(messages, (list, tuple)):
+        return str(messages)
+    parts: list[str] = []
+    for msg in messages:
+        if isinstance(msg, str):
+            parts.append(msg)
+        elif isinstance(msg, dict):
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        parts.append(block.get("text", ""))
+        elif hasattr(msg, "text"):
+            parts.append(str(msg.text))
+    return "\n".join(parts)
+
+
+def _classify_prompt(messages: Any) -> str:
+    """Classify prompt into one of the 8 categories using keyword heuristics."""
+    text = _extract_text(messages)
+    if not text.strip():
+        return "other"
+    for label, pattern in _CLASSIFICATION_RULES:
+        if pattern.search(text):
+            return label
+    # Default: short messages are chat, longer ones are other
+    if len(text) < 500:
+        return "chat"
+    return "other"
+
+
+def _score_complexity(messages: Any, prompt_type: str, tokens_in: int) -> int:
+    """Score prompt complexity 1–10 based on metadata heuristics."""
+    text = _extract_text(messages)
+    score = 1
+
+    # Token count signal
+    if tokens_in > 4000:
+        score += 3
+    elif tokens_in > 1500:
+        score += 2
+    elif tokens_in > 500:
+        score += 1
+
+    # Message count (multi-turn = more complex)
+    if isinstance(messages, (list, tuple)):
+        n_msgs = len(messages)
+        if n_msgs > 10:
+            score += 2
+        elif n_msgs > 3:
+            score += 1
+
+    # Code fences suggest structured/complex requests
+    code_blocks = text.count("```")
+    if code_blocks >= 4:
+        score += 2
+    elif code_blocks >= 2:
+        score += 1
+
+    # Prompt type bias
+    type_bias = {"code": 2, "analysis": 1, "extraction": 1, "creative": 1}
+    score += type_bias.get(prompt_type, 0)
+
+    # Text length (chars) as a secondary signal
+    if len(text) > 3000:
+        score += 1
+
+    return min(score, 10)
+
+
 # ── Main class ────────────────────────────────────────────────────────────────
 
 class TokenGauge:
@@ -140,6 +281,10 @@ class TokenGauge:
     token:    SDK token copied from your TokenGauge dashboard Settings page.
     base_url: URL of your TokenGauge server (no trailing slash).
     app_tag:  Optional label for this integration (e.g. "chatbot", "summarizer").
+    classify: Enable local prompt classification and complexity scoring (default True).
+              When enabled, the SDK inspects prompt text locally to compute prompt_type
+              and complexity. Raw prompt text is NEVER sent to TokenGauge.
+              Set to False to disable — only token counts and metadata will be logged.
     verbose:  Print errors/status to stderr instead of silently ignoring them.
 
     Examples
@@ -173,6 +318,7 @@ class TokenGauge:
         self,
         token: str,
         app_tag: str | None = None,
+        classify: bool = True,
         verbose: bool = False,
     ) -> None:
         if not token:
@@ -180,6 +326,7 @@ class TokenGauge:
         self.token = token
         self.base_url = self._BASE_URL
         self.app_tag = app_tag
+        self.classify = classify
         self._verbose = verbose
 
     # ── Auth ──────────────────────────────────────────────────────────────────
@@ -190,6 +337,7 @@ class TokenGauge:
         email: str,
         password: str,
         app_tag: str | None = None,
+        classify: bool = True,
         verbose: bool = False,
     ) -> "TokenGauge":
         """
@@ -228,7 +376,7 @@ class TokenGauge:
             # Fall back to short-lived access token if SDK token fetch fails
             token = access_token
 
-        return cls(token=token, app_tag=app_tag, verbose=verbose)
+        return cls(token=token, app_tag=app_tag, classify=classify, verbose=verbose)
 
     # ── Wrap ──────────────────────────────────────────────────────────────────
 
@@ -279,6 +427,7 @@ class TokenGauge:
         key_hint = self._extract_key_hint(client)
 
         def _create(*args: Any, **kwargs: Any) -> Any:
+            messages = kwargs.get("messages")
             start = time.monotonic()
             response = _orig(*args, **kwargs)
             latency_ms = int((time.monotonic() - start) * 1000)
@@ -293,6 +442,7 @@ class TokenGauge:
                     latency_ms=latency_ms,
                     app_tag=app_tag,
                     key_hint=key_hint,
+                    messages=messages,
                 )
             return response
 
@@ -307,6 +457,7 @@ class TokenGauge:
         key_hint = self._extract_key_hint(client)
 
         async def _create(*args: Any, **kwargs: Any) -> Any:
+            messages = kwargs.get("messages")
             start = time.monotonic()
             response = await _orig(*args, **kwargs)
             latency_ms = int((time.monotonic() - start) * 1000)
@@ -321,6 +472,7 @@ class TokenGauge:
                     latency_ms=latency_ms,
                     app_tag=app_tag,
                     key_hint=key_hint,
+                    messages=messages,
                 )
             return response
 
@@ -335,6 +487,11 @@ class TokenGauge:
         key_hint = self._extract_key_hint(client)
 
         def _create(*args: Any, **kwargs: Any) -> Any:
+            messages = kwargs.get("messages")
+            # Anthropic has system prompt as a separate kwarg
+            system = kwargs.get("system")
+            if system and messages:
+                messages = [{"role": "system", "content": system}] + list(messages)
             start = time.monotonic()
             response = _orig(*args, **kwargs)
             latency_ms = int((time.monotonic() - start) * 1000)
@@ -349,6 +506,7 @@ class TokenGauge:
                     latency_ms=latency_ms,
                     app_tag=app_tag,
                     key_hint=key_hint,
+                    messages=messages,
                 )
             return response
 
@@ -363,6 +521,10 @@ class TokenGauge:
         key_hint = self._extract_key_hint(client)
 
         async def _create(*args: Any, **kwargs: Any) -> Any:
+            messages = kwargs.get("messages")
+            system = kwargs.get("system")
+            if system and messages:
+                messages = [{"role": "system", "content": system}] + list(messages)
             start = time.monotonic()
             response = await _orig(*args, **kwargs)
             latency_ms = int((time.monotonic() - start) * 1000)
@@ -377,6 +539,7 @@ class TokenGauge:
                     latency_ms=latency_ms,
                     app_tag=app_tag,
                     key_hint=key_hint,
+                    messages=messages,
                 )
             return response
 
@@ -392,6 +555,8 @@ class TokenGauge:
         key_hint = self._extract_key_hint(client)
 
         def _generate(*args: Any, **kwargs: Any) -> Any:
+            # google.genai: contents is 2nd positional arg or kwarg
+            contents = kwargs.get("contents", args[1] if len(args) > 1 else None)
             start = time.monotonic()
             response = _orig(*args, **kwargs)
             latency_ms = int((time.monotonic() - start) * 1000)
@@ -408,6 +573,7 @@ class TokenGauge:
                     latency_ms=latency_ms,
                     app_tag=app_tag,
                     key_hint=key_hint,
+                    messages=contents,
                 )
             return response
 
@@ -426,6 +592,8 @@ class TokenGauge:
         _orig = client.generate_content
 
         def _generate(*args: Any, **kwargs: Any) -> Any:
+            # Legacy SDK: first positional arg is the content/prompt
+            contents = args[0] if args else kwargs.get("contents")
             start = time.monotonic()
             response = _orig(*args, **kwargs)
             latency_ms = int((time.monotonic() - start) * 1000)
@@ -439,6 +607,7 @@ class TokenGauge:
                     latency_ms=latency_ms,
                     app_tag=app_tag,
                     key_hint=key_hint,
+                    messages=contents,
                 )
             return response
 
@@ -471,11 +640,20 @@ class TokenGauge:
         latency_ms: int,
         app_tag: str | None,
         key_hint: str | None = None,
+        messages: Any = None,
     ) -> None:
         """Fire-and-forget: log in a background thread so the caller is never blocked."""
+        # Classify locally before spawning the thread (prompt text stays here)
+        prompt_type: str | None = None
+        complexity: int | None = None
+        if self.classify and messages is not None:
+            prompt_type = _classify_prompt(messages)
+            complexity = _score_complexity(messages, prompt_type, tokens_in)
+
         threading.Thread(
             target=self._send,
-            args=(provider, model, tokens_in, tokens_out, latency_ms, app_tag, key_hint),
+            args=(provider, model, tokens_in, tokens_out, latency_ms, app_tag,
+                  key_hint, prompt_type, complexity),
             daemon=False,
         ).start()
 
@@ -491,29 +669,38 @@ class TokenGauge:
         latency_ms: int,
         app_tag: str | None,
         key_hint: str | None = None,
+        prompt_type: str | None = None,
+        complexity: int | None = None,
     ) -> None:
         import sys
         try:
             import httpx
 
+            payload: dict[str, Any] = {
+                "provider": provider,
+                "model": model,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "cost_usd": _calc_cost(model, tokens_in, tokens_out),
+                "latency_ms": latency_ms,
+                "app_tag": app_tag,
+                "key_hint": key_hint,
+            }
+            if prompt_type is not None:
+                payload["prompt_type"] = prompt_type
+            if complexity is not None:
+                payload["complexity"] = complexity
+
             response = httpx.post(
                 f"{self.base_url}/usage/",
-                json={
-                    "provider": provider,
-                    "model": model,
-                    "tokens_in": tokens_in,
-                    "tokens_out": tokens_out,
-                    "cost_usd": _calc_cost(model, tokens_in, tokens_out),
-                    "latency_ms": latency_ms,
-                    "app_tag": app_tag,
-                    "key_hint": key_hint,
-                },
+                json=payload,
                 headers={"Authorization": f"Bearer {self.token}"},
                 timeout=5,
             )
             if self._verbose:
                 if response.is_success:
-                    print(f"[TokenGauge] Logged {provider}/{model}: {tokens_in}in {tokens_out}out", file=sys.stderr, flush=True)
+                    extra = f" [{prompt_type}|c={complexity}]" if prompt_type else ""
+                    print(f"[TokenGauge] Logged {provider}/{model}: {tokens_in}in {tokens_out}out{extra}", file=sys.stderr, flush=True)
                 else:
                     print(f"[TokenGauge] Failed to log usage: HTTP {response.status_code} — {response.text}", file=sys.stderr, flush=True)
         except Exception as e:
