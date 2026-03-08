@@ -132,7 +132,7 @@ class TokenGauge:
         )
     """
 
-    _BASE_URL = "https://tokengauge.app" #update when deployed
+    _BASE_URL = "https://tokengauge.onrender.com"
 
     def __init__(
         self,
