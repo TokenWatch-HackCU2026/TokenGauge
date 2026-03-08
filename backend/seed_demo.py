@@ -100,6 +100,7 @@ async def seed_demo():
             email=DEMO_EMAIL,
             password_hash=hash_password(DEMO_PASSWORD),
             full_name="Demo Account",
+            is_demo=True,
         )
         await user.insert()
         print(f"[demo-seed] Created '{DEMO_EMAIL}' (password: {DEMO_PASSWORD}) -> {user.id}")

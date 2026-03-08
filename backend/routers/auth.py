@@ -174,6 +174,9 @@ async def get_sdk_token(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    if user.is_demo:
+        raise HTTPException(status_code=403, detail="SDK tokens are disabled for demo accounts")
+
     if not user.sdk_token or regenerate:
         user.sdk_token = create_sdk_token(current_user["user_id"], current_user["email"])
         await user.save()

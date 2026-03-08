@@ -20,6 +20,7 @@ class User(Document):
     avatar_url: Optional[str] = None
     phone: Optional[str] = None
     is_active: bool = True
+    is_demo: bool = False
 
     # Google OAuth
     google_id: Optional[str] = None
