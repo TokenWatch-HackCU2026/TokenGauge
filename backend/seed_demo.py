@@ -121,7 +121,7 @@ async def seed_demo():
         print(f"[demo-seed] Deleted {existing} existing records")
 
     now = datetime.now(timezone.utc)
-    total_days = 90
+    total_days = 365
     calls = []
 
     for day_offset in range(total_days):

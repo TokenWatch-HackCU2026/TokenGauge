@@ -5,7 +5,7 @@ import {
   ResponsiveContainer, ComposedChart, Area, Line,
 } from "recharts";
 import {
-  fetchRecords, fetchSummary, fetchDashboardSummary,
+  fetchRecords, fetchSummary,
   fetchQuota,
   fetchSdkToken, regenerateSdkToken, recalculateCosts, updatePhone,
   fetchSpendLimits, updateSpendLimits, fetchSpendStatus,
@@ -38,22 +38,6 @@ function IconEmpty() {
 type Range = "live" | "1D" | "1W" | "1M" | "3M" | "YTD" | "1Y" | "ALL";
 const RANGES: Range[] = ["live", "1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"];
 
-function rangeToParams(range: Range) {
-  const now = new Date();
-  const ms: Record<Range, number | null> = {
-    live: 3_600_000,
-    "1D": 86_400_000,
-    "1W": 7 * 86_400_000,
-    "1M": 30 * 86_400_000,
-    "3M": 90 * 86_400_000,
-    YTD: now.getTime() - new Date(now.getFullYear(), 0, 1).getTime(),
-    "1Y": 365 * 86_400_000,
-    ALL: null,
-  };
-  const offset = ms[range];
-  if (offset === null) return {};
-  return { startDate: new Date(now.getTime() - offset).toISOString(), endDate: now.toISOString() };
-}
 
 // Auto-pick chart granularity from range — fine intervals for smooth scrubbing
 function rangeToGranularity(range: Range): Granularity {
@@ -95,7 +79,6 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
   const [range, setRange] = useState<Range>("1W");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [filters, setFilters] = useState<{ provider: string; appTag: string; keyHint: string }>({ provider: "all", appTag: "all", keyHint: "all" });
-  const params = rangeToParams(range);
   const gran = rangeToGranularity(range);
 
   // Escape key closes mobile sidebar
@@ -106,17 +89,13 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
     return () => window.removeEventListener("keydown", handleKey);
   }, [sidebarOpen]);
 
-  const { data: dashSummary } = useQuery({
-    queryKey: ["dashboard-summary", range],
-    queryFn: () => fetchDashboardSummary(params),
-  });
   const { data: summary = [] } = useQuery({
     queryKey: ["summary"],
     queryFn: fetchSummary,
   });
   const { data: records = [], isLoading } = useQuery({
     queryKey: ["records"],
-    queryFn: () => fetchRecords(100),
+    queryFn: () => fetchRecords(5000),
     refetchInterval: 3000,
     placeholderData: () => loadCache<ApiCall[]>("records") ?? [],
   });
@@ -361,7 +340,7 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
 
         <div style={{ flex: 1, padding: mobile ? "1rem" : "1.75rem 2rem", overflow: "auto" }}>
           {page === "overview" && (
-            <OverviewPage summary={summary} records={filteredRecords} dashSummary={dashSummary} loading={isLoading} gran={gran} range={range} mobile={mobile} />
+            <OverviewPage summary={summary} records={filteredRecords} loading={isLoading} gran={gran} range={range} mobile={mobile} />
           )}
           {page === "usage" && <UsagePage summary={summary} records={filteredRecords} loading={isLoading} mobile={mobile} />}
           {page === "settings" && <SettingsPage quota={quota} user={user} mobile={mobile} />}
@@ -1110,16 +1089,18 @@ function FilterBar({ filters, onChange, options, hasActive, mobile }: {
             onChange={v => onChange({ ...filters, provider: v })}
           />
           {/* App Tag */}
-          {options.appTags.length > 0 && (
+          {options.appTags.length > 0 && (<>
+            <div style={{ height: 1, background: C.border }} />
             <FilterRow
               label="App Tag"
               value={filters.appTag}
               options={options.appTags}
               onChange={v => onChange({ ...filters, appTag: v })}
             />
-          )}
+          </>)}
           {/* API Key */}
-          {options.keyHints.length > 0 && (
+          {options.keyHints.length > 0 && (<>
+            <div style={{ height: 1, background: C.border }} />
             <FilterRow
               label="API Key"
               value={filters.keyHint}
@@ -1127,7 +1108,7 @@ function FilterBar({ filters, onChange, options, hasActive, mobile }: {
               formatOption={v => `…${v}`}
               onChange={v => onChange({ ...filters, keyHint: v })}
             />
-          )}
+          </>)}
           {/* Clear */}
           {hasActive && (
             <button
@@ -1196,23 +1177,31 @@ function FilterChip({ label, active, onClick }: { label: string; active: boolean
 }
 
 // ─── Overview ─────────────────────────────────────────────────────────────────
-function OverviewPage({ summary, records, dashSummary, loading, gran, range, mobile }: {
+function OverviewPage({ summary, records, loading, gran, range, mobile }: {
   summary: ApiCallSummary[];
   records: ApiCall[];
-  dashSummary: { total_tokens_in: number; total_tokens_out: number; total_cost_usd: number; request_count: number; avg_latency_ms: number } | undefined;
   loading: boolean;
   gran: Granularity;
   range: Range;
   mobile: boolean;
 }) {
+  // Compute KPIs from filtered + time-windowed records
+  const kpis = useMemo(() => {
+    const totalCost = records.reduce((s, r) => s + r.cost_usd, 0);
+    const totalTokens = records.reduce((s, r) => s + r.tokens_in + r.tokens_out, 0);
+    const count = records.length;
+    const avgLatency = count > 0 ? records.reduce((s, r) => s + r.latency_ms, 0) / count : 0;
+    return { totalCost, totalTokens, count, avgLatency };
+  }, [records]);
+
   return (
     <div>
       {/* KPI cards */}
       <div style={{ display: "grid", gridTemplateColumns: mobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: "0.75rem", marginBottom: "1.25rem" }}>
-        <KpiCard label="Total Spend" value={loading ? "—" : fmtCost(dashSummary?.total_cost_usd ?? 0)} />
-        <KpiCard label="Total Tokens" value={loading ? "—" : fmtNum((dashSummary?.total_tokens_in ?? 0) + (dashSummary?.total_tokens_out ?? 0))} />
-        <KpiCard label="API Calls" value={loading ? "—" : fmtNum(dashSummary?.request_count ?? 0)} />
-        <KpiCard label="Avg Latency" value={loading ? "—" : `${(dashSummary?.avg_latency_ms ?? 0).toFixed(0)}ms`} />
+        <KpiCard label="Total Spend" value={loading ? "—" : fmtCost(kpis.totalCost)} />
+        <KpiCard label="Total Tokens" value={loading ? "—" : fmtNum(kpis.totalTokens)} />
+        <KpiCard label="API Calls" value={loading ? "—" : fmtNum(kpis.count)} />
+        <KpiCard label="Avg Latency" value={loading ? "—" : `${kpis.avgLatency.toFixed(0)}ms`} />
       </div>
 
       {/* Cost + Requests side by side on desktop */}
