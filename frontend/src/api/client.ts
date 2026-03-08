@@ -206,3 +206,7 @@ export function fetchSdkToken(): Promise<{ sdk_token: string }> {
 export function regenerateSdkToken(): Promise<{ sdk_token: string }> {
   return get("/api/v1/auth/sdk-token?regenerate=true");
 }
+
+export function recalculateCosts(): Promise<{ recalculated: number }> {
+  return post("/usage/recalculate-costs", {});
+}

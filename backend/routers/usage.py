@@ -10,6 +10,55 @@ from database import get_db
 from models import ApiCall
 from schemas import ApiCallCreate, ApiCallOut, ApiCallSummary
 
+_PRICING = {
+    "gpt-4o": {"input": 2.50, "output": 10.00},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    "gpt-4.1": {"input": 2.00, "output": 8.00},
+    "gpt-4.1-mini": {"input": 0.40, "output": 1.60},
+    "gpt-4.1-nano": {"input": 0.10, "output": 0.40},
+    "gpt-4-turbo": {"input": 10.00, "output": 30.00},
+    "gpt-4": {"input": 30.00, "output": 60.00},
+    "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
+    "o1": {"input": 15.00, "output": 60.00},
+    "o1-mini": {"input": 1.10, "output": 4.40},
+    "o3": {"input": 2.00, "output": 8.00},
+    "o3-mini": {"input": 1.10, "output": 4.40},
+    "o4-mini": {"input": 1.10, "output": 4.40},
+    "claude-opus-4.6": {"input": 5.00, "output": 25.00},
+    "claude-opus-4.5": {"input": 5.00, "output": 25.00},
+    "claude-opus-4": {"input": 15.00, "output": 75.00},
+    "claude-sonnet-4.6": {"input": 3.00, "output": 15.00},
+    "claude-sonnet-4.5": {"input": 3.00, "output": 15.00},
+    "claude-sonnet-4": {"input": 3.00, "output": 15.00},
+    "claude-haiku-4.5": {"input": 1.00, "output": 5.00},
+    "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00},
+    "claude-3-7-sonnet": {"input": 3.00, "output": 15.00},
+    "claude-3-5-sonnet": {"input": 3.00, "output": 15.00},
+    "claude-3-5-haiku": {"input": 0.80, "output": 4.00},
+    "claude-3-opus": {"input": 15.00, "output": 75.00},
+    "claude-3-haiku": {"input": 0.25, "output": 1.25},
+    "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
+    "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
+    "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
+    "gemini-2.0-flash-lite": {"input": 0.075, "output": 0.30},
+    "gemini-flash-latest": {"input": 0.10, "output": 0.40},
+    "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
+    "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
+    "gemini-pro": {"input": 0.50, "output": 1.50},
+}
+
+
+def _calc_cost(model: str, tokens_in: int, tokens_out: int) -> float:
+    price = _PRICING.get(model)
+    if price is None:
+        for key, val in _PRICING.items():
+            if model.startswith(key) or key.startswith(model):
+                price = val
+                break
+    if price is None:
+        return 0.0
+    return (tokens_in / 1_000_000) * price["input"] + (tokens_out / 1_000_000) * price["output"]
+
 router = APIRouter(prefix="/usage", tags=["usage"])
 
 
@@ -75,6 +124,20 @@ async def delete_record(record_id: str, current_user: dict = Depends(get_current
         raise HTTPException(status_code=403, detail="Not your record")
     await doc.delete()
     return {"ok": True}
+
+
+@router.post("/recalculate-costs")
+async def recalculate_costs(current_user: dict = Depends(get_current_user)):
+    uid = PydanticObjectId(current_user["user_id"])
+    docs = await ApiCall.find(ApiCall.user_id == uid, ApiCall.cost_usd == 0.0).to_list()
+    updated = 0
+    for doc in docs:
+        cost = _calc_cost(doc.model, doc.tokens_in, doc.tokens_out)
+        if cost > 0:
+            doc.cost_usd = cost
+            await doc.save()
+            updated += 1
+    return {"recalculated": updated}
 
 
 def _to_out(doc: ApiCall) -> ApiCallOut:

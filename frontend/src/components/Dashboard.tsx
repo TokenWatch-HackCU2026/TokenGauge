@@ -7,7 +7,7 @@ import {
 import {
   fetchRecords, fetchSummary, fetchDashboardSummary,
   fetchTimeseries, fetchBreakdown, fetchQuota,
-  fetchSdkToken, regenerateSdkToken,
+  fetchSdkToken, regenerateSdkToken, recalculateCosts,
   ApiCall, ApiCallSummary, TimeseriesPoint, BreakdownRow, UserOut,
 } from "../api/client";
 
@@ -312,6 +312,8 @@ function SettingsPage({ quota }: { quota: { limit: number; used: number; remaini
   const [sdkToken, setSdkToken] = useState<string | null>(null);
   const [sdkCopied, setSdkCopied] = useState(false);
   const [sdkLoading, setSdkLoading] = useState(false);
+  const [recalcLoading, setRecalcLoading] = useState(false);
+  const [recalcMsg, setRecalcMsg] = useState<string | null>(null);
 
   // Auto-load existing token on mount
   useState(() => { fetchSdkToken().then(r => setSdkToken(r.sdk_token)).catch(() => {}); });
@@ -324,6 +326,19 @@ function SettingsPage({ quota }: { quota: { limit: number; used: number; remaini
       setSdkToken(res.sdk_token);
     } finally {
       setSdkLoading(false);
+    }
+  }
+
+  async function handleRecalculate() {
+    setRecalcLoading(true);
+    setRecalcMsg(null);
+    try {
+      const res = await recalculateCosts();
+      setRecalcMsg(`Updated ${res.recalculated} record${res.recalculated !== 1 ? "s" : ""}`);
+    } catch {
+      setRecalcMsg("Failed — try again");
+    } finally {
+      setRecalcLoading(false);
     }
   }
 
@@ -357,6 +372,15 @@ function SettingsPage({ quota }: { quota: { limit: number; used: number; remaini
           <p style={{ margin: 0, fontSize: "0.8rem", color: C.muted }}>
             Use the same token across all your projects — tag them with <code style={{ background: C.bg, padding: "2px 4px", borderRadius: 3 }}>app_tag</code> to tell them apart.
           </p>
+        </div>
+      </Card>
+
+      <Card title="Fix $0.00 costs" subtitle="Recalculates cost for records that logged as $0.00 due to unrecognized model names">
+        <div style={{ marginTop: "0.75rem", display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <button onClick={handleRecalculate} disabled={recalcLoading} style={{ ...btnStyle(C.accent) }}>
+            {recalcLoading ? "Recalculating…" : "Recalculate costs"}
+          </button>
+          {recalcMsg && <span style={{ fontSize: "0.85rem", color: C.subtle }}>{recalcMsg}</span>}
         </div>
       </Card>
 
