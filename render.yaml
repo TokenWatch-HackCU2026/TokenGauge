@@ -72,12 +72,6 @@ services:
         source: /dashboard/*
         destination: https://tokengauge-api.onrender.com/dashboard/*
       - type: rewrite
-        source: /keys/*
-        destination: https://tokengauge-api.onrender.com/keys/*
-      - type: rewrite
-        source: /proxy/*
-        destination: https://tokengauge-api.onrender.com/proxy/*
-      - type: rewrite
         source: /health
         destination: https://tokengauge-api.onrender.com/health
       - type: rewrite

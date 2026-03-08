@@ -23,12 +23,15 @@ export default function AuthPage({ onAuth }: Props) {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [slow, setSlow] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setSlow(false);
     setLoading(true);
+    const slowTimer = setTimeout(() => setSlow(true), 5000);
     try {
       const res =
         mode === "login"
@@ -38,7 +41,9 @@ export default function AuthPage({ onAuth }: Props) {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
+      clearTimeout(slowTimer);
       setLoading(false);
+      setSlow(false);
     }
   }
 
@@ -160,6 +165,22 @@ export default function AuthPage({ onAuth }: Props) {
                 }}
               >
                 {error}
+              </div>
+            )}
+
+            {slow && (
+              <div
+                style={{
+                  background: `#6366f118`,
+                  border: `1px solid #6366f144`,
+                  borderRadius: 8,
+                  padding: "0.6rem 0.85rem",
+                  fontSize: "0.82rem",
+                  color: C.subtle,
+                  textAlign: "center",
+                }}
+              >
+                Server is waking up — this can take up to 30 seconds on first visit.
               </div>
             )}
 
