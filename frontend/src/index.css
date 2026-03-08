@@ -1,5 +1,5 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html, body, #root { height: 100%; }
+html, body, #root { height: 100%; margin: 0; overflow: hidden; }
 body { background: #0a0e1a; }
 button { font-family: inherit; }
 input, select { font-family: inherit; outline: none; }

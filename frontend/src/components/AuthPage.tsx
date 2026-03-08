@@ -62,13 +62,15 @@ export default function AuthPage({ onAuth }: Props) {
   return (
     <div
       style={{
-        minHeight: "100vh",
+        height: "100%",
+        overflow: "auto",
         background: C.bg,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         fontFamily: "'Inter', system-ui, sans-serif",
         color: C.text,
+        padding: "2rem 0",
       }}
     >
       <div style={{ width: "100%", maxWidth: 400, padding: "0 1rem" }}>

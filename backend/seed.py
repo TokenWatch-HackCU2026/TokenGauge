@@ -2,11 +2,16 @@
 Seed script for local development.
 Creates a test user and fake api_calls if they don't already exist.
 
+Configure via env vars:
+    SEED_EMAIL      — account to seed data for (default: test@tokengauge.dev)
+    SEED_PASSWORD   — password if creating a new account (default: password123)
+
 Usage:
     python seed.py           # skips api_calls if any exist
     python seed.py --force   # wipes api_calls and re-seeds
 """
 import asyncio
+import os
 import random
 import sys
 from datetime import datetime, timedelta, timezone
@@ -15,10 +20,8 @@ from auth import hash_password
 from database import connect_db, disconnect_db
 from models import ApiCall, User
 
-TEST_EMAIL = "test@tokengauge.dev"
-TEST_PASSWORD = "password123"
-
-_DEV_USER_ID_STR = "000000000000000000000001"
+SEED_EMAIL = os.getenv("SEED_EMAIL", "test@tokengauge.dev")
+SEED_PASSWORD = os.getenv("SEED_PASSWORD", "password123")
 
 PROVIDERS = [
     ("anthropic", "claude-3-5-sonnet", 3.00, 15.00),
@@ -36,20 +39,18 @@ def _cost(tokens_in: int, tokens_out: int, price_in: float, price_out: float) ->
 async def seed() -> None:
     await connect_db()
 
-    from beanie import PydanticObjectId
-
     # ── User ─────────────────────────────────────────────────────────────────
-    user = await User.find_one(User.email == TEST_EMAIL)
+    user = await User.find_one(User.email == SEED_EMAIL)
     if not user:
         user = User(
-            email=TEST_EMAIL,
-            password_hash=hash_password(TEST_PASSWORD),
+            email=SEED_EMAIL,
+            password_hash=hash_password(SEED_PASSWORD),
             full_name="Test User",
         )
         await user.insert()
-        print(f"[seed] Created user '{TEST_EMAIL}' (password: {TEST_PASSWORD}) -> {user.id}")
+        print(f"[seed] Created user '{SEED_EMAIL}' (password: {SEED_PASSWORD}) -> {user.id}")
     else:
-        print(f"[seed] User already exists -> {user.id}")
+        print(f"[seed] Seeding data for existing user '{SEED_EMAIL}' -> {user.id}")
 
     uid = user.id
 
@@ -66,7 +67,6 @@ async def seed() -> None:
         calls = []
         for day_offset in range(30):
             ts_base = now - timedelta(days=day_offset)
-            # 3–12 calls per day
             for _ in range(random.randint(3, 12)):
                 provider, model, price_in, price_out = random.choice(PROVIDERS)
                 tokens_in  = random.randint(200, 4000)
