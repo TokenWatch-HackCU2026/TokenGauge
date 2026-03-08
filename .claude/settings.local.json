@@ -51,7 +51,10 @@
       "Bash(curl -s -X POST http://localhost:8000/api/v1/auth/register \\\\\n  -H \"Content-Type: application/json\" \\\\\n  -d '{\"email\":\"testuser@example.com\",\"password\":\"TestPass123!\",\"full_name\":\"Test\"}' | python3 -m json.tool)",
       "Bash(curl -s -X POST http://localhost:8000/api/v1/auth/register \\\\\n  -H 'Content-Type: application/json' \\\\\n  --data-raw '{\"email\":\"testuser@example.com\",\"password\":\"TestPass123\",\"full_name\":\"Test\"}' | python3 -m json.tool)",
       "Bash(source venv/bin/activate && uvicorn main:app --reload 2>&1)",
-      "Bash(source /Users/james-vallery/Desktop/Code/HACKCU_2026/backend/venv/bin/activate && pip install -r /Users/james-vallery/Desktop/Code/HACKCU_2026/backend/requirements.txt 2>&1 | tail -5)"
+      "Bash(source /Users/james-vallery/Desktop/Code/HACKCU_2026/backend/venv/bin/activate && pip install -r /Users/james-vallery/Desktop/Code/HACKCU_2026/backend/requirements.txt 2>&1 | tail -5)",
+      "Bash(cd /Users/james-vallery/Desktop/Code/HACKCU_2026/backend && python3 -m pytest tests/test_usage.py -v 2>&1)",
+      "Bash(cd /Users/james-vallery/Desktop/Code/HACKCU_2026/backend && source venv/bin/activate && python -m pytest tests/test_usage.py -v 2>&1)",
+      "Bash(source venv/bin/activate && python -m pytest tests/test_proxy.py -v 2>&1)"
     ]
   }
 }

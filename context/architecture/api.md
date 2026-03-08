@@ -1,12 +1,16 @@
 # TokenWatch — REST API Reference
 
-All endpoints are prefixed with `/api/v1`. Protected routes require `Authorization: Bearer <access_token>`.
+Two auth types are used:
+- 🔒 **JWT** — short-lived access token for web app sessions (`Authorization: Bearer <jwt>`)
+- 🗝️ **SDK Token** — long-lived write-only token for SDK data ingestion (`Authorization: Bearer tw-...`)
+
+All web app endpoints are prefixed with `/api/v1`.
 
 ---
 
 ## Auth
 
-### `POST /auth/register`
+### `POST /api/v1/auth/register`
 Register a new user account.
 
 **Request**
@@ -28,7 +32,7 @@ Register a new user account.
 
 ---
 
-### `POST /auth/login`
+### `POST /api/v1/auth/login`
 Authenticate and receive tokens.
 
 **Request**
@@ -49,14 +53,12 @@ Authenticate and receive tokens.
 
 ---
 
-### `POST /auth/refresh`
+### `POST /api/v1/auth/refresh`
 Exchange a refresh token for a new access token.
 
 **Request**
 ```json
-{
-  "refresh_token": "..."
-}
+{ "refresh_token": "..." }
 ```
 **Response `200`**
 ```json
@@ -68,14 +70,12 @@ Exchange a refresh token for a new access token.
 
 ---
 
-### `POST /auth/logout`
-Invalidate the current refresh token. 🔒 Protected.
+### `POST /api/v1/auth/logout`
+Invalidate the current refresh token. 🔒 JWT
 
 **Request**
 ```json
-{
-  "refresh_token": "..."
-}
+{ "refresh_token": "..." }
 ```
 **Response `204`** — No content.
 
@@ -83,8 +83,8 @@ Invalidate the current refresh token. 🔒 Protected.
 
 ## Users
 
-### `GET /users/me`
-Get the authenticated user's profile. 🔒 Protected.
+### `GET /api/v1/users/me`
+Get the authenticated user's profile. 🔒 JWT
 
 **Response `200`**
 ```json
@@ -92,16 +92,14 @@ Get the authenticated user's profile. 🔒 Protected.
   "id": "...",
   "email": "...",
   "full_name": "...",
-  "avatar_url": "...",
-  "phone": "+1...",
   "created_at": "2026-03-07T00:00:00Z"
 }
 ```
 
 ---
 
-### `PATCH /users/me`
-Update the authenticated user's profile. 🔒 Protected.
+### `PATCH /api/v1/users/me`
+Update the authenticated user's profile. 🔒 JWT
 
 **Request** *(all fields optional)*
 ```json
@@ -114,92 +112,93 @@ Update the authenticated user's profile. 🔒 Protected.
 
 ---
 
-## API Key Vault
+## SDK Tokens
 
-### `POST /keys`
-Register an AI provider key. Key is encrypted at rest via AWS KMS. 🔒 Protected.
+### `POST /api/v1/sdk-tokens`
+Generate a new long-lived SDK token. Raw value returned once only — not stored in plaintext. 🔒 JWT
 
 **Request**
 ```json
 {
-  "provider": "anthropic",
-  "api_key": "sk-ant-..."
+  "name": "production"
 }
 ```
 **Response `201`**
 ```json
 {
   "id": "...",
-  "provider": "anthropic",
-  "key_hint": "a1b2",
+  "name": "production",
+  "token": "tw-abc123...",
   "created_at": "..."
 }
 ```
+> ⚠️ `token` is only returned here. Copy it now — it cannot be retrieved again.
 
 ---
 
-### `GET /keys`
-List all registered keys for the authenticated user. Raw keys are never returned. 🔒 Protected.
+### `GET /api/v1/sdk-tokens`
+List all SDK tokens for the authenticated user. Raw tokens never returned. 🔒 JWT
 
 **Response `200`**
 ```json
 [
   {
     "id": "...",
-    "provider": "anthropic",
-    "key_hint": "a1b2",
-    "created_at": "..."
+    "name": "production",
+    "created_at": "...",
+    "last_used_at": "..."
   }
 ]
 ```
 
 ---
 
-### `DELETE /keys/{key_id}`
-Delete a registered key. 🔒 Protected.
+### `DELETE /api/v1/sdk-tokens/{token_id}`
+Revoke an SDK token immediately. Any SDK using it will stop being able to ingest data. 🔒 JWT
 
 **Response `204`** — No content.
 
 ---
 
-## Proxy
+## Usage Ingestion (SDK → TokenWatch)
 
-### `POST /proxy/{provider}/{model}`
-Forward an AI request through the TokenWatch gateway. The gateway authenticates the user, enforces rate limits, decrypts the provider key in-memory, forwards the request, logs usage, and returns the provider's response unmodified. 🔒 Protected.
+### `POST /usage`
+Ingest a single usage record from the SDK. 🗝️ SDK Token
 
-**Path params**
-- `provider` — `anthropic` | `openai` | `google` | `mistral`
-- `model` — e.g. `claude-3-5-sonnet`, `gpt-4o`, `gemini-1.5-flash`, `mistral-large`
+This endpoint is called automatically by the SDK after every API response. Not intended for direct use.
 
-**Headers** *(optional)*
-- `X-App-Tag: my-app` — tag this request for per-application tracking
-
-**Request** *(mirrors provider API shape)*
+**Request**
 ```json
 {
-  "messages": [
-    { "role": "user", "content": "Hello" }
-  ],
-  "max_tokens": 1024,
-  "temperature": 0.7
+  "provider": "openai",
+  "model": "gpt-4o-mini",
+  "tokens_in": 512,
+  "tokens_out": 128,
+  "cost_usd": 0.000102,
+  "latency_ms": 340,
+  "app_tag": "my-app"
 }
 ```
-**Response `200`** — Raw provider response, unmodified.
-
-**Response `429`** — Rate limit exceeded.
+**Response `200`**
 ```json
 {
-  "error": "Rate limit exceeded",
-  "retry_after": 42
+  "id": "...",
+  "provider": "openai",
+  "model": "gpt-4o-mini",
+  "tokens_in": 512,
+  "tokens_out": 128,
+  "cost_usd": 0.000102,
+  "latency_ms": 340,
+  "timestamp": "..."
 }
 ```
 
 ---
 
-## Usage
+## Usage (Dashboard Queries)
 
 ### `GET /usage`
-Query raw usage records from `api_calls`. 🔒 Protected.
+Query raw usage records. 🔒 JWT
 
 **Query params**
 | Param | Type | Description |
@@ -210,173 +209,81 @@ Query raw usage records from `api_calls`. 🔒 Protected.
 | `model` | string | Filter by model |
 | `app_tag` | string | Filter by app tag |
 | `limit` | int | Max records (default 100) |
-| `offset` | int | Pagination offset |
-
-**Response `200`**
-```json
-{
-  "total": 1200,
-  "records": [
-    {
-      "id": "...",
-      "provider": "anthropic",
-      "model": "claude-3-5-sonnet",
-      "tokens_in": 512,
-      "tokens_out": 256,
-      "cost_usd": 0.0054,
-      "latency_ms": 340,
-      "app_tag": "my-app",
-      "timestamp": "..."
-    }
-  ]
-}
-```
-
----
-
-### `GET /usage/summary`
-Aggregated token and cost totals grouped by time bucket. 🔒 Protected.
-
-**Query params**
-| Param | Type | Description |
-|-------|------|-------------|
-| `start` | ISO datetime | Start of date range |
-| `end` | ISO datetime | End of date range |
-| `group_by` | `hour` \| `day` | Time bucket size (default `day`) |
-| `provider` | string | Optional filter |
-| `model` | string | Optional filter |
-| `app_tag` | string | Optional filter |
-
-**Response `200`**
-```json
-[
-  {
-    "date": "2026-03-07",
-    "provider": "anthropic",
-    "model": "claude-3-5-sonnet",
-    "total_tokens_in": 50000,
-    "total_tokens_out": 25000,
-    "total_cost_usd": 0.525,
-    "request_count": 42,
-    "avg_latency_ms": 310
-  }
-]
-```
-
----
-
-### `GET /usage/cost`
-Cost breakdown by provider and model for a time range. 🔒 Protected.
-
-**Query params** — `start`, `end` (required)
-
-**Response `200`**
-```json
-{
-  "total_cost_usd": 12.45,
-  "by_provider": [
-    { "provider": "anthropic", "cost_usd": 8.20, "request_count": 300 }
-  ],
-  "by_model": [
-    { "model": "claude-3-5-sonnet", "cost_usd": 6.10, "request_count": 180 }
-  ]
-}
-```
-
----
-
-## Rate Limits
-
-### `GET /rate-limits`
-Get the authenticated user's current quota usage and limit status. 🔒 Protected.
-
-**Response `200`**
-```json
-{
-  "tokens_per_minute": {
-    "limit": 100000,
-    "used": 24000,
-    "remaining": 76000,
-    "reset_at": "2026-03-07T00:01:00Z"
-  },
-  "tokens_per_day": {
-    "limit": 5000000,
-    "used": 1200000,
-    "remaining": 3800000,
-    "reset_at": "2026-03-08T00:00:00Z"
-  }
-}
-```
-
----
-
-## Webhooks *(Post-MVP)*
-
-### `POST /webhooks`
-Register a webhook endpoint to receive usage events after every proxy request. 🔒 Protected.
-
-**Request**
-```json
-{
-  "url": "https://my-app.com/hooks/tokenwatch"
-}
-```
-**Response `201`**
-```json
-{
-  "id": "...",
-  "url": "https://my-app.com/hooks/tokenwatch",
-  "created_at": "..."
-}
-```
-
----
-
-### `GET /webhooks`
-List all registered webhook endpoints. 🔒 Protected.
-
-**Response `200`**
-```json
-[
-  { "id": "...", "url": "...", "created_at": "..." }
-]
-```
-
----
-
-### `DELETE /webhooks/{webhook_id}`
-Remove a webhook endpoint. 🔒 Protected.
-
-**Response `204`** — No content.
-
----
-
-### `GET /webhooks/{webhook_id}/logs`
-View recent delivery attempt logs for a webhook. 🔒 Protected.
+| `skip` | int | Pagination offset |
 
 **Response `200`**
 ```json
 [
   {
     "id": "...",
-    "webhook_id": "...",
-    "status": "delivered",
-    "attempts": 1,
-    "response_status": 200,
-    "delivered_at": "..."
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "tokens_in": 512,
+    "tokens_out": 128,
+    "cost_usd": 0.000102,
+    "latency_ms": 340,
+    "app_tag": "my-app",
+    "timestamp": "..."
   }
 ]
 ```
 
-**Webhook payload** (POST'd to registered URLs after every proxy request):
+---
+
+### `GET /usage/summary`
+Aggregated totals grouped by provider + model. 🔒 JWT
+
+**Response `200`**
+```json
+[
+  {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "total_tokens_in": 50000,
+    "total_tokens_out": 25000,
+    "total_cost_usd": 0.525,
+    "request_count": 42
+  }
+]
+```
+
+---
+
+## Webhooks *(Post-MVP)*
+
+### `POST /api/v1/webhooks`
+Register a webhook to receive usage events. 🔒 JWT
+
+**Request**
+```json
+{ "url": "https://my-app.com/hooks/tokenwatch" }
+```
+**Response `201`**
+```json
+{ "id": "...", "url": "...", "created_at": "..." }
+```
+
+---
+
+### `GET /api/v1/webhooks`
+List registered webhooks. 🔒 JWT
+
+---
+
+### `DELETE /api/v1/webhooks/{webhook_id}`
+Remove a webhook. 🔒 JWT — **Response `204`**
+
+---
+
+**Webhook payload** (POST'd to registered URLs after every usage event ingested):
 ```json
 {
   "user_id": "...",
-  "provider": "anthropic",
-  "model": "claude-3-5-sonnet",
+  "provider": "openai",
+  "model": "gpt-4o-mini",
   "tokens_in": 512,
-  "tokens_out": 256,
-  "cost_usd": 0.0054,
+  "tokens_out": 128,
+  "cost_usd": 0.000102,
   "app_tag": "my-app",
   "timestamp": "..."
 }
@@ -386,8 +293,8 @@ View recent delivery attempt logs for a webhook. 🔒 Protected.
 
 ## Alerts *(Post-MVP)*
 
-### `GET /alerts`
-List triggered alerts for the authenticated user. 🔒 Protected.
+### `GET /api/v1/alerts`
+List triggered alerts. 🔒 JWT
 
 **Response `200`**
 ```json
@@ -404,17 +311,15 @@ Alert types: `quota_80` | `quota_100` | `spike_detected`
 
 ---
 
-### `PATCH /alerts/{alert_id}/acknowledge`
-Mark an alert as acknowledged. 🔒 Protected.
-
-**Response `200`** — Updated alert object.
+### `PATCH /api/v1/alerts/{alert_id}/acknowledge`
+Acknowledge an alert. 🔒 JWT — **Response `200`** — Updated alert object.
 
 ---
 
 ## Optimizer *(Post-MVP)*
 
-### `GET /optimizer/suggestions`
-Weekly model suggestions — shows what model would have been optimal per request and the potential savings. 🔒 Protected.
+### `GET /api/v1/optimizer/suggestions`
+Model suggestions with potential savings. 🔒 JWT
 
 **Response `200`**
 ```json
@@ -427,29 +332,6 @@ Weekly model suggestions — shows what model would have been optimal per reques
       "request_count": 80,
       "savings_usd": 2.10,
       "complexity_avg": 2.4
-    }
-  ]
-}
-```
-
----
-
-### `GET /optimizer/report`
-Usage summary report categorized by prompt type and model. 🔒 Protected.
-
-**Query params** — `start`, `end`
-
-**Response `200`**
-```json
-{
-  "period": { "start": "...", "end": "..." },
-  "by_type": [
-    {
-      "type": "chat",
-      "request_count": 200,
-      "cost_usd": 1.20,
-      "optimal_model": "claude-3-haiku",
-      "potential_savings_usd": 0.80
     }
   ]
 }
