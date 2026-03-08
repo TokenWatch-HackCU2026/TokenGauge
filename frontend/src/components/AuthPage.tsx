@@ -117,7 +117,7 @@ export default function AuthPage({ onAuth }: Props) {
                   fontSize: "0.875rem",
                   fontWeight: 600,
                   background: mode === m ? C.accent : "transparent",
-                  color: mode === m ? "#fff" : C.muted,
+                  color: mode === m ? C.onAccent : C.muted,
                   transition: "all 0.15s",
                 }}
               >
@@ -189,7 +189,7 @@ export default function AuthPage({ onAuth }: Props) {
               disabled={loading}
               style={{
                 background: loading ? C.muted : C.accent,
-                color: "#fff",
+                color: C.onAccent,
                 border: "none",
                 borderRadius: 10,
                 padding: "0.7rem",
@@ -231,6 +231,8 @@ export default function AuthPage({ onAuth }: Props) {
   );
 }
 
+let fieldIdCounter = 0;
+
 function Field({
   label,
   type,
@@ -246,10 +248,12 @@ function Field({
   onChange: (v: string) => void;
   required?: boolean;
 }) {
+  const [id] = useState(() => `field-${++fieldIdCounter}`);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-      <label style={{ fontSize: "0.82rem", color: C.subtle, fontWeight: 500 }}>{label}</label>
+      <label htmlFor={id} style={{ fontSize: "0.82rem", color: C.subtle, fontWeight: 500 }}>{label}</label>
       <input
+        id={id}
         type={type}
         placeholder={placeholder}
         value={value}

@@ -16,8 +16,9 @@ export const C = {
 
   // Text
   text: "#f1f5f9",
-  muted: "#64748b",
+  muted: "#7c8db0",
   subtle: "#94a3b8",
+  onAccent: "#ffffff",
 } as const;
 
 export const PROVIDER_COLORS: Record<string, string> = {

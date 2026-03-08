@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -12,6 +12,26 @@ import {
   ApiCall, ApiCallSummary, BreakdownRow, UserOut,
 } from "../api/client";
 import { C, PROVIDER_COLORS, PIE_COLORS, LINE_COLORS, GaugeLogo } from "../theme";
+
+// ─── SVG Icons ───────────────────────────────────────────────────────────────
+function IconMenu() {
+  return <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="5" x2="17" y2="5"/><line x1="3" y1="10" x2="17" y2="10"/><line x1="3" y1="15" x2="17" y2="15"/></svg>;
+}
+function IconClose() {
+  return <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="4" y1="4" x2="14" y2="14"/><line x1="14" y1="4" x2="4" y2="14"/></svg>;
+}
+function IconOverview() {
+  return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>;
+}
+function IconUsage() {
+  return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="1,12 5,6 9,9 15,3"/><line x1="11" y1="3" x2="15" y2="3"/><line x1="15" y1="3" x2="15" y2="7"/></svg>;
+}
+function IconSettings() {
+  return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M2.8 2.8l1.1 1.1M12.1 12.1l1.1 1.1M13.2 2.8l-1.1 1.1M3.9 12.1l-1.1 1.1"/></svg>;
+}
+function IconEmpty() {
+  return <svg width="32" height="32" viewBox="0 0 32 32" fill="none" stroke={C.muted} strokeWidth="1.5" strokeLinecap="round"><circle cx="16" cy="16" r="12" strokeDasharray="4 3"/><line x1="16" y1="11" x2="16" y2="17"/><circle cx="16" cy="21" r="0.5" fill={C.muted}/></svg>;
+}
 
 // ─── Date range helpers ───────────────────────────────────────────────────────
 type Range = "live" | "1D" | "1W" | "1M" | "3M" | "YTD" | "1Y" | "ALL";
@@ -61,10 +81,10 @@ function useIsMobile(breakpoint = 768) {
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Page = "overview" | "usage" | "settings";
 
-const NAV_ITEMS: { id: Page; icon: string; label: string }[] = [
-  { id: "overview", icon: "◈", label: "Overview" },
-  { id: "usage", icon: "◉", label: "Usage" },
-  { id: "settings", icon: "◎", label: "Settings" },
+const NAV_ITEMS: { id: Page; icon: React.ReactNode; label: string }[] = [
+  { id: "overview", icon: <IconOverview />, label: "Overview" },
+  { id: "usage", icon: <IconUsage />, label: "Usage" },
+  { id: "settings", icon: <IconSettings />, label: "Settings" },
 ];
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
@@ -75,6 +95,14 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const params = rangeToParams(range);
   const gran = rangeToGranularity(range);
+
+  // Escape key closes mobile sidebar
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSidebarOpen(false); };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [sidebarOpen]);
 
   const { data: dashSummary } = useQuery({
     queryKey: ["dashboard-summary", range],
@@ -132,10 +160,14 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
   }, []);
 
   // Merge live records with fetched, deduplicated, newest first
-  const allRecords = [...liveRecords, ...records].reduce<ApiCall[]>((acc, r) => {
-    if (!acc.find(x => x.id === r.id)) acc.push(r);
-    return acc;
-  }, []);
+  const allRecords = useMemo(() => {
+    const seen = new Set<string>();
+    const result: ApiCall[] = [];
+    for (const r of [...liveRecords, ...records]) {
+      if (!seen.has(r.id)) { seen.add(r.id); result.push(r); }
+    }
+    return result;
+  }, [liveRecords, records]);
 
   const sidebar = (
     <aside style={{
@@ -146,7 +178,7 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
       display: "flex",
       flexDirection: "column",
       flexShrink: 0,
-      ...(mobile ? { position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 100 } : {}),
+      ...(mobile ? { height: "100%" } : {}),
     }}>
       <div style={{ padding: "1.5rem 1.25rem 1.25rem", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
@@ -154,15 +186,16 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
           <span style={{ fontWeight: 700, fontSize: "1.05rem", letterSpacing: "-0.02em" }}>TokenGauge</span>
         </div>
         {mobile && (
-          <button onClick={() => setSidebarOpen(false)} style={{ background: "none", border: "none", color: C.muted, fontSize: "1.25rem", cursor: "pointer", padding: 4 }}>✕</button>
+          <button onClick={() => setSidebarOpen(false)} aria-label="Close sidebar" style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", padding: 4, display: "flex", alignItems: "center" }}><IconClose /></button>
         )}
       </div>
 
-      <nav style={{ flex: 1, padding: "0.75rem 0.5rem" }}>
+      <nav style={{ flex: 1, padding: "0.75rem 0.5rem" }} aria-label="Main navigation">
         {NAV_ITEMS.map(({ id, icon, label }) => (
           <button
             key={id}
             onClick={() => { setPage(id); if (mobile) setSidebarOpen(false); }}
+            aria-current={page === id ? "page" : undefined}
             style={{
               width: "100%", display: "flex", alignItems: "center", gap: "0.75rem",
               padding: "0.6rem 0.75rem", border: "none", borderRadius: 8, cursor: "pointer",
@@ -172,7 +205,7 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
               marginBottom: 2, transition: "all 0.15s",
             }}
           >
-            <span style={{ fontSize: "0.8rem" }}>{icon}</span>
+            <span aria-hidden="true" style={{ display: "flex", alignItems: "center" }}>{icon}</span>
             {label}
           </button>
         ))}
@@ -208,12 +241,31 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
     <div style={{ display: "flex", height: "100vh", background: C.bg, color: C.text, fontFamily: "'Inter', system-ui, sans-serif", overflow: "hidden" }}>
       {/* ── Sidebar ── */}
       {mobile ? (
-        sidebarOpen && (
-          <>
-            <div onClick={() => setSidebarOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 99 }} />
+        <>
+          {/* Backdrop */}
+          <div
+            onClick={() => setSidebarOpen(false)}
+            style={{
+              position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 99,
+              opacity: sidebarOpen ? 1 : 0,
+              pointerEvents: sidebarOpen ? "auto" : "none",
+              transition: "opacity 0.2s ease",
+            }}
+          />
+          {/* Sliding sidebar panel */}
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation"
+            style={{
+              position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 100,
+              transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)",
+              transition: "transform 0.25s ease",
+            }}
+          >
             {sidebar}
-          </>
-        )
+          </div>
+        </>
       ) : sidebar}
 
       {/* ── Main ── */}
@@ -226,7 +278,7 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             {mobile && (
-              <button onClick={() => setSidebarOpen(true)} style={{ background: "none", border: "none", color: C.text, fontSize: "1.25rem", cursor: "pointer", padding: 0 }}>☰</button>
+              <button onClick={() => setSidebarOpen(true)} aria-label="Open menu" style={{ background: "none", border: "none", color: C.text, cursor: "pointer", padding: 2, display: "flex", alignItems: "center" }}><IconMenu /></button>
             )}
             <h1 style={{ margin: 0, fontSize: mobile ? "1rem" : "1.15rem", fontWeight: 600, whiteSpace: "nowrap" }}>
               {NAV_ITEMS.find(n => n.id === page)?.label}
@@ -243,11 +295,11 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
                   onClick={() => setRange(r)}
                   style={{
                     background: range === r ? C.accent : "transparent",
-                    color: range === r ? "#fff" : C.muted,
+                    color: range === r ? C.onAccent : C.muted,
                     border: "none",
                     borderRadius: 6,
-                    padding: mobile ? "0.3rem 0.5rem" : "0.35rem 0.7rem",
-                    fontSize: mobile ? "0.7rem" : "0.78rem",
+                    padding: mobile ? "0.5rem 0.6rem" : "0.35rem 0.7rem",
+                    fontSize: mobile ? "0.72rem" : "0.78rem",
                     fontWeight: 600,
                     cursor: "pointer",
                     transition: "all 0.12s",
@@ -268,7 +320,7 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
             <OverviewPage summary={summary} records={allRecords} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} gran={gran} range={range} mobile={mobile} />
           )}
           {page === "usage" && <UsagePage summary={summary} records={allRecords} loading={isLoading} mobile={mobile} />}
-          {page === "settings" && <SettingsPage quota={quota} user={user} />}
+          {page === "settings" && <SettingsPage quota={quota} user={user} mobile={mobile} />}
         </div>
       </main>
     </div>
@@ -384,13 +436,39 @@ function generateTimeline(range: Range, gran: Granularity): { sort: string; labe
 // ─── Model Usage Line Chart ──────────────────────────────────────────────────
 type UsageMetric = "cost" | "requests" | "tokens";
 
+// Custom SVG cursor: vertical line + floating pill that tracks the pointer
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function CrosshairCursor({ points, height, payload, fmtValue }: any) {
+  if (!points?.[0]) return null;
+  const x = points[0].x as number;
+  let total = 0;
+  if (payload) for (const p of payload) total += (p.value as number) ?? 0;
+  const label = payload?.[0]?.payload?.date ?? "";
+  const pillW = Math.max(90, label.length * 7 + 20);
+
+  return (
+    <g>
+      <line x1={x} y1={0} x2={x} y2={height} stroke={C.muted} strokeWidth={1} strokeDasharray="4 4" />
+      <foreignObject x={x - pillW / 2} y={-44} width={pillW} height={42} style={{ overflow: "visible", pointerEvents: "none" }}>
+        <div style={{
+          background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8,
+          padding: "3px 10px", textAlign: "center", whiteSpace: "nowrap",
+        }}>
+          <div style={{ fontSize: "0.82rem", fontWeight: 700, color: C.text }}>{fmtValue(total)}</div>
+          <div style={{ fontSize: "0.65rem", color: C.muted }}>{label}</div>
+        </div>
+      </foreignObject>
+    </g>
+  );
+}
+
 function ModelUsageChart({ records, gran, range }: { records: ApiCall[]; gran: Granularity; range: Range }) {
   const [metric, setMetric] = useState<UsageMetric>("cost");
   const [selected, setSelected] = useState<string | null>(null);
   const [hover, setHover] = useState<{ date: string; values: Record<string, number>; total: number } | null>(null);
 
-  // 1. Build full timeline with every bucket
-  const timeline = generateTimeline(range, gran);
+  // 1. Build full timeline with every bucket (memoized)
+  const timeline = useMemo(() => generateTimeline(range, gran), [range, gran]);
 
   // 2. Fill in record values
   const filled: Record<string, Record<string, number>> = {};
@@ -405,35 +483,41 @@ function ModelUsageChart({ records, gran, range }: { records: ApiCall[]; gran: G
     filled[sort][r.model] = (filled[sort][r.model] ?? 0) + val;
   }
 
-  // 3. Build chart data — timeline order, zeros for missing models
+  // 3. Build chart data — cumulative (running total) per model
   const modelList = Array.from(models);
+  const cumulative: Record<string, number> = {};
+  for (const m of modelList) cumulative[m] = 0;
+
   const data = timeline.map(({ sort, label }) => {
     const row: Record<string, string | number> = { date: label };
-    for (const m of modelList) row[m] = filled[sort]?.[m] ?? 0;
+    for (const m of modelList) {
+      cumulative[m] += filled[sort]?.[m] ?? 0;
+      row[m] = cumulative[m];
+    }
     return row;
   });
 
-  // Total across all time for the default display
-  const totalValue = data.reduce((sum, row) => {
-    for (const m of modelList) sum += (row[m] as number) ?? 0;
-    return sum;
-  }, 0);
+  // Total = final cumulative value (the rightmost point)
+  const totalValue = modelList.reduce((sum, m) => sum + cumulative[m], 0);
 
-  const fmtValue = (v: number) => metric === "cost" ? fmtCost(v) : fmtNum(v);
+  const fmtValue = useCallback(
+    (v: number) => metric === "cost" ? fmtCost(v) : fmtNum(v),
+    [metric],
+  );
   const metricLabels: Record<UsageMetric, string> = { cost: "Total Spend", requests: "Total Requests", tokens: "Total Tokens" };
 
   const toggleBtn = (label: string, val: UsageMetric) => (
     <button
       key={val}
       onClick={() => setMetric(val)}
-      style={{ background: metric === val ? C.accent : C.border, color: metric === val ? "#fff" : C.muted, border: "none", borderRadius: 6, padding: "0.25rem 0.65rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}
+      style={{ background: metric === val ? C.accent : C.border, color: metric === val ? C.onAccent : C.muted, border: "none", borderRadius: 6, padding: "0.25rem 0.65rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}
     >
       {label}
     </button>
   );
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleMouseMove = (state: any) => {
+  const handleMouseMove = useCallback((state: any) => {
     if (state?.activePayload?.length) {
       const payload = state.activePayload;
       const date = state.activeLabel as string;
@@ -445,9 +529,9 @@ function ModelUsageChart({ records, gran, range }: { records: ApiCall[]; gran: G
       }
       setHover({ date, values, total });
     }
-  };
+  }, []);
 
-  const handleMouseLeave = () => setHover(null);
+  const handleMouseLeave = useCallback(() => setHover(null), []);
 
   return (
     <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1.25rem 1.5rem" }}>
@@ -469,7 +553,7 @@ function ModelUsageChart({ records, gran, range }: { records: ApiCall[]; gran: G
       {/* Per-model breakdown on hover */}
       {hover && modelList.length > 1 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem 1.25rem", marginBottom: "0.5rem" }}>
-          {modelList.filter(m => (hover.values[m] ?? 0) > 0).map((model, i) => (
+          {modelList.filter(m => (hover.values[m] ?? 0) > 0).map((model) => (
             <span key={model} style={{ fontSize: "0.78rem", color: C.subtle }}>
               <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: LINE_COLORS[modelList.indexOf(model) % LINE_COLORS.length], marginRight: 5, verticalAlign: "middle" }} />
               {model}: {fmtValue(hover.values[model] ?? 0)}
@@ -480,13 +564,15 @@ function ModelUsageChart({ records, gran, range }: { records: ApiCall[]; gran: G
 
       {data.length === 0 ? <EmptyState label="No data for this period" /> : (
         <>
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={data} onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}>
+          {/* top margin makes room for the floating pill above the crosshair */}
+          <ResponsiveContainer width="100%" height={260}>
+            <LineChart data={data} onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave} margin={{ top: 48, right: 8, bottom: 0, left: 8 }}>
               <XAxis dataKey="date" hide />
               <YAxis hide />
               <Tooltip
-                content={() => null}
-                cursor={{ stroke: C.muted, strokeWidth: 1, strokeDasharray: "4 4" }}
+                content={<span />}
+                cursor={<CrosshairCursor fmtValue={fmtValue} />}
+                isAnimationActive={false}
               />
               {modelList.map((model, i) => (
                 <Line
@@ -499,6 +585,7 @@ function ModelUsageChart({ records, gran, range }: { records: ApiCall[]; gran: G
                   dot={false}
                   activeDot={selected === null || selected === model ? { r: 4, fill: LINE_COLORS[i % LINE_COLORS.length], stroke: C.surface, strokeWidth: 2 } : false}
                   name={model}
+                  isAnimationActive={false}
                 />
               ))}
             </LineChart>
@@ -609,6 +696,7 @@ function UsagePage({ summary, records, loading, mobile }: { summary: ApiCallSumm
           <select
             value={filterProvider}
             onChange={e => setFilterProvider(e.target.value)}
+            aria-label="Filter by provider"
             style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.35rem 0.6rem", fontSize: "0.8rem", cursor: "pointer" }}
           >
             {providers.map(p => <option key={p} value={p}>{p === "all" ? "All providers" : p}</option>)}
@@ -624,7 +712,7 @@ function UsagePage({ summary, records, loading, mobile }: { summary: ApiCallSumm
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
-function SettingsPage({ quota, user }: { quota: { limit: number; used: number; remaining: number; reset_at: number; window_ms: number } | undefined; user?: UserOut | null }) {
+function SettingsPage({ quota, user, mobile }: { quota: { limit: number; used: number; remaining: number; reset_at: number; window_ms: number } | undefined; user?: UserOut | null; mobile?: boolean }) {
   const pct = quota ? Math.round((quota.used / quota.limit) * 100) : 0;
   const resetAt = quota ? new Date(quota.reset_at).toLocaleTimeString() : "—";
   const [sdkToken, setSdkToken] = useState<string | null>(null);
@@ -635,12 +723,14 @@ function SettingsPage({ quota, user }: { quota: { limit: number; used: number; r
   const [phone, setPhone] = useState(user?.phone ?? "");
   const [phoneSaving, setPhoneSaving] = useState(false);
   const [phoneMsg, setPhoneMsg] = useState<string | null>(null);
+  const [confirmRegen, setConfirmRegen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Auto-load existing token on mount
-  useState(() => { fetchSdkToken().then(r => setSdkToken(r.sdk_token)).catch(() => {}); });
+  useEffect(() => { fetchSdkToken().then(r => setSdkToken(r.sdk_token)).catch(() => {}); }, []);
 
   async function handleRegenerate() {
-    if (!confirm("Regenerate SDK token? Your old token will stop working.")) return;
+    setConfirmRegen(false);
     setSdkLoading(true);
     try {
       const res = await regenerateSdkToken();
@@ -695,7 +785,7 @@ function SettingsPage({ quota, user }: { quota: { limit: number; used: number; r
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem", maxWidth: 560 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem", maxWidth: mobile ? "100%" : 560 }}>
       <Card title="SDK Token" subtitle="Use this token with the tokengauge-sdk package (valid 1 year)">
         <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
           <p style={{ margin: 0, fontSize: "0.85rem", color: C.subtle }}>
@@ -710,9 +800,17 @@ function SettingsPage({ quota, user }: { quota: { limit: number; used: number; r
             <button onClick={handleCopy} disabled={!sdkToken} style={{ ...btnStyle(sdkCopied ? C.green : C.accent) }}>
               {sdkCopied ? "Copied!" : "Copy token"}
             </button>
-            <button onClick={handleRegenerate} disabled={sdkLoading} style={{ ...btnStyle(C.muted) }}>
-              {sdkLoading ? "Rotating…" : "Regenerate"}
-            </button>
+            {confirmRegen ? (
+              <>
+                <span style={{ fontSize: "0.82rem", color: C.red }}>Old token will stop working.</span>
+                <button onClick={handleRegenerate} disabled={sdkLoading} style={{ ...btnStyle(C.red) }}>Confirm</button>
+                <button onClick={() => setConfirmRegen(false)} style={{ ...btnStyle(C.border) }}>Cancel</button>
+              </>
+            ) : (
+              <button onClick={() => setConfirmRegen(true)} disabled={sdkLoading} style={{ ...btnStyle(C.muted) }}>
+                {sdkLoading ? "Rotating…" : "Regenerate"}
+              </button>
+            )}
           </div>
           <p style={{ margin: 0, fontSize: "0.8rem", color: C.muted }}>
             Use the same token across all your projects — tag them with <code style={{ background: C.bg, padding: "2px 4px", borderRadius: 3 }}>app_tag</code> to tell them apart.
@@ -742,8 +840,8 @@ function SettingsPage({ quota, user }: { quota: { limit: number; used: number; r
         </div>
       </Card>
 
-      <Card title="Rate limits" subtitle="Set monthly token budgets per user">
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "0.75rem" }}>
+      <Card title="Rate limits" subtitle="Set monthly token budgets per user — coming soon">
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "0.75rem", opacity: 0.5, pointerEvents: "none" }}>
           <LabeledInput label="Monthly token limit" defaultValue="5000000" />
           <LabeledInput label="Daily token limit" defaultValue="500000" />
           <LabeledInput label="Alert threshold (%)" defaultValue="80" />
@@ -754,8 +852,9 @@ function SettingsPage({ quota, user }: { quota: { limit: number; used: number; r
       <Card title="SMS Alerts" subtitle="Get texted when you hit 80% or 100% of your daily token quota">
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "0.75rem" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-            <label style={{ fontSize: "0.82rem", color: C.subtle }}>Phone number (E.164 format)</label>
+            <label htmlFor="phone-input" style={{ fontSize: "0.82rem", color: C.subtle }}>Phone number (E.164 format)</label>
             <input
+              id="phone-input"
               value={phone}
               onChange={e => setPhone(e.target.value)}
               placeholder="+15551234567"
@@ -780,28 +879,39 @@ function SettingsPage({ quota, user }: { quota: { limit: number; used: number; r
 
       <Card title="Danger zone" subtitle="Irreversible actions">
         <div style={{ marginTop: "0.75rem" }}>
-          <button style={btnStyle(C.red)}>Delete all usage records</button>
+          {confirmDelete ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "0.85rem", color: C.red }}>This will permanently delete all your usage data.</span>
+              <button onClick={() => setConfirmDelete(false)} style={{ ...btnStyle(C.border) }}>Cancel</button>
+              <button style={{ ...btnStyle(C.red) }}>Delete everything</button>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmDelete(true)} style={btnStyle(C.red)}>Delete all usage records</button>
+          )}
         </div>
       </Card>
     </div>
   );
 }
-const FLAG_COLORS = {
-  low: "#22c55e",
-  medium: "#f59e0b",
-  high: "#ef4444",
+const FLAG_COLORS: Record<string, string> = {
+  low: C.green,
+  medium: C.yellow,
+  high: C.red,
 };
 
 // ─── Shared components ────────────────────────────────────────────────────────
+const FLAG_ICONS: Record<string, string> = { low: "↓", medium: "→", high: "↑" };
+
 function RequestsTable({ records }: { records: ApiCall[] }) {
   if (records.length === 0) return <EmptyState label="No requests yet." />;
   return (
-    <div style={{ overflowX: "auto", marginTop: "0.5rem" }}>
+    <div style={{ overflowX: "auto", marginTop: "0.5rem" }} role="region" aria-label="Requests table" tabIndex={0}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+        <caption style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)" }}>API request history</caption>
         <thead>
           <tr>
             {["Time", "Provider", "Model", "App Tag", "Key", "In", "Out", "Latency", "Cost", "Level"].map(h => (
-              <th key={h} style={{ textAlign: "left", padding: "0.5rem 0.75rem", color: C.muted, fontSize: "0.8rem", fontWeight: 500, borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" }}>{h}</th>
+              <th key={h} scope="col" style={{ textAlign: "left", padding: "0.5rem 0.75rem", color: C.muted, fontSize: "0.8rem", fontWeight: 500, borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" }}>{h}</th>
             ))}
           </tr>
         </thead>
@@ -820,7 +930,7 @@ function RequestsTable({ records }: { records: ApiCall[] }) {
               <td style={tdStyle}>
                 {r.cost_flag ? (
                   <Pill color={FLAG_COLORS[r.cost_flag]}>
-                    {r.cost_flag.charAt(0).toUpperCase() + r.cost_flag.slice(1)}
+                    {FLAG_ICONS[r.cost_flag]} {r.cost_flag.charAt(0).toUpperCase() + r.cost_flag.slice(1)}
                   </Pill>
                 ) : "—"}
               </td>
@@ -833,10 +943,15 @@ function RequestsTable({ records }: { records: ApiCall[] }) {
 }
 
 function KpiCard({ label, value }: { label: string; value: string }) {
+  const isLoading = value === "—";
   return (
     <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1rem 1.25rem" }}>
       <div style={{ color: C.muted, fontSize: "0.75rem", marginBottom: "0.35rem" }}>{label}</div>
-      <div style={{ fontSize: "clamp(1.1rem, 4vw, 1.75rem)", fontWeight: 700, letterSpacing: "-0.03em" }}>{value}</div>
+      {isLoading ? (
+        <div style={{ height: "1.75rem", width: "60%", background: C.border, borderRadius: 6, animation: "pulse 1.5s ease-in-out infinite" }} />
+      ) : (
+        <div style={{ fontSize: "clamp(1.1rem, 4vw, 1.75rem)", fontWeight: 700, letterSpacing: "-0.03em" }}>{value}</div>
+      )}
     </div>
   );
 }
@@ -885,17 +1000,20 @@ function ProviderBadge({ provider, small }: { provider: string; small?: boolean 
 function EmptyState({ label }: { label: string }) {
   return (
     <div style={{ textAlign: "center", padding: "2.5rem 1rem", color: C.muted, fontSize: "0.9rem" }}>
-      <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>◌</div>
+      <div style={{ marginBottom: "0.5rem", display: "flex", justifyContent: "center" }}><IconEmpty /></div>
       {label}
     </div>
   );
 }
 
+let labeledIdCounter = 0;
 function LabeledInput({ label, defaultValue, placeholder }: { label: string; defaultValue?: string; placeholder?: string }) {
+  const [id] = useState(() => `labeled-${++labeledIdCounter}`);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-      <label style={{ fontSize: "0.82rem", color: C.subtle }}>{label}</label>
+      <label htmlFor={id} style={{ fontSize: "0.82rem", color: C.subtle }}>{label}</label>
       <input
+        id={id}
         defaultValue={defaultValue}
         placeholder={placeholder}
         style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.5rem 0.75rem", fontSize: "0.9rem" }}
@@ -905,7 +1023,7 @@ function LabeledInput({ label, defaultValue, placeholder }: { label: string; def
 }
 
 function btnStyle(color: string): React.CSSProperties {
-  return { background: color, color: "#fff", border: "none", borderRadius: 8, padding: "0.5rem 1rem", cursor: "pointer", fontSize: "0.85rem", fontWeight: 600 };
+  return { background: color, color: C.onAccent, border: "none", borderRadius: 8, padding: "0.5rem 1rem", cursor: "pointer", fontSize: "0.85rem", fontWeight: 600 };
 }
 
 const tdStyle: React.CSSProperties = { padding: "0.6rem 0.75rem", verticalAlign: "middle" };
