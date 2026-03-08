@@ -283,7 +283,7 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
       ) : sidebar}
 
       {/* ── Main ── */}
-      <main style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden" }}>
         <header style={{
           padding: mobile ? "0.75rem 1rem" : "1.25rem 2rem",
           borderBottom: `1px solid ${C.border}`,
@@ -403,8 +403,14 @@ function bucketInfoFromDate(d: Date, gran: Granularity): { sort: string; label: 
   }
 }
 
+// Parse timestamp as UTC if it lacks a timezone indicator, then convert to local
+function parseTimestamp(ts: string): Date {
+  if (/[Zz]|[+-]\d{2}:?\d{2}$/.test(ts)) return new Date(ts);
+  return new Date(ts + "Z");
+}
+
 function bucketInfo(ts: string, gran: Granularity) {
-  return bucketInfoFromDate(new Date(ts), gran);
+  return bucketInfoFromDate(parseTimestamp(ts), gran);
 }
 
 // Generate every bucket in a range so the chart is continuous (zeros where no data)
@@ -650,7 +656,7 @@ function CostBarChart({ records, range, mobile }: { records: ApiCall[]; range: R
       <ResponsiveContainer width="100%" height={mobile ? 220 : 260}>
         <BarChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 4 }} barCategoryGap="20%" barGap={1}>
           <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-          <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} width={50} />
+          <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} width={50} scale="log" domain={['auto', 'auto']} allowDataOverflow />
           <Tooltip content={<BarTooltip fmtValue={fmtCost} />} cursor={{ fill: `${C.muted}15` }} />
           {models.map((model, i) => (
             <Bar
@@ -700,7 +706,7 @@ function RequestsBarChart({ records, range, mobile }: { records: ApiCall[]; rang
       <ResponsiveContainer width="100%" height={mobile ? 220 : 260}>
         <BarChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 4 }} barCategoryGap="20%" barGap={1}>
           <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-          <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtNum(v)} width={40} />
+          <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtNum(v)} width={40} scale="log" domain={['auto', 'auto']} allowDataOverflow />
           <Tooltip content={<BarTooltip fmtValue={fmtNum} />} cursor={{ fill: `${C.muted}15` }} />
           {models.map((model, i) => (
             <Bar
@@ -802,7 +808,7 @@ function FilterBar({ filters, onChange, options, hasActive, mobile }: {
       borderBottom: `1px solid ${C.border}`,
       background: C.surface,
       display: "flex", alignItems: "center", gap: mobile ? "0.5rem" : "1rem",
-      flexWrap: "wrap",
+      flexWrap: "wrap", flexShrink: 0,
     }}>
       <span style={{ ...labelStyle, flexShrink: 0 }}>Filters</span>
 
