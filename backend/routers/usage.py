@@ -114,11 +114,12 @@ async def get_usage(limit: int = 100, skip: int = 0, current_user: dict = Depend
     def flag(cost: float) -> str | None:
         if std_dev == 0 or mean == 0:
             return None
-        if cost < mean - std_dev:
+        z = (cost - mean) / std_dev
+        if z <= 1:
             return "low"
-        if cost > mean + std_dev:
-            return "high"
-        return "medium"
+        if z <= 2:
+            return "medium"
+        return "high"
 
     return [_to_out(d, flag(d.cost_usd)) for d in docs]
 
