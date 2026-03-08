@@ -8,6 +8,7 @@ import {
   fetchRecords, fetchSummary, fetchDashboardSummary,
   fetchBreakdown, fetchQuota,
   fetchSdkToken, regenerateSdkToken, recalculateCosts, updatePhone,
+  createLiveSocket,
   ApiCall, ApiCallSummary, BreakdownRow, UserOut,
 } from "../api/client";
 import { C, PROVIDER_COLORS, PIE_COLORS, LINE_COLORS, GaugeLogo } from "../theme";
@@ -124,6 +125,30 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
     queryKey: ["quota"],
     queryFn: fetchQuota,
   });
+
+  // ── Atlas-triggered WebSocket push ──────────────────────────────────────────
+  const queryClient = useQueryClient();
+  const [isLive, setIsLive] = useState(false);
+  useEffect(() => {
+    let ws: WebSocket;
+    let reconnectTimeout: number;
+    let dead = false;
+    function connect() {
+      ws = createLiveSocket((newRecs) => {
+        if (newRecs.length === 0) return;
+        queryClient.setQueryData<ApiCall[]>(["records"], (prev = []) => {
+          const existingIds = new Set(prev.map(r => r.id));
+          const fresh = newRecs.filter(r => !existingIds.has(r.id));
+          return [...fresh, ...prev].slice(0, 100);
+        });
+      });
+      ws.onopen = () => setIsLive(true);
+      ws.onclose = () => { setIsLive(false); if (!dead) reconnectTimeout = window.setTimeout(connect, 3000); };
+      ws.onerror = () => setIsLive(false);
+    }
+    connect();
+    return () => { dead = true; clearTimeout(reconnectTimeout); ws.close(); };
+  }, [queryClient]);
 
 
   const sidebar = (
@@ -268,7 +293,7 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
                 </button>
               ))}
             </div>
-            {!mobile && <Pill color={C.green}>● Live</Pill>}
+            {!mobile && <Pill color={isLive ? C.green : C.muted}>{isLive ? "● Live" : "○ Connecting…"}</Pill>}
           </div>
         </header>
 

@@ -25,6 +25,8 @@ services:
         value: "7"
       - key: FRONTEND_URL
         value: https://tokengauge.onrender.com
+      - key: ATLAS_WEBHOOK_SECRET
+        sync: false  # set a strong random value in the Render dashboard
 
   # ── React Frontend (Static Site) ──
   - type: web
