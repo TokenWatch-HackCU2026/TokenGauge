@@ -409,11 +409,11 @@ class TokenGauge:
         latency_ms: int,
         app_tag: str | None,
     ) -> None:
-        """Fire-and-forget: log in a daemon thread so the caller is never blocked."""
+        """Fire-and-forget: log in a background thread so the caller is never blocked."""
         threading.Thread(
             target=self._send,
             args=(provider, model, tokens_in, tokens_out, latency_ms, app_tag),
-            daemon=True,
+            daemon=False,
         ).start()
 
     # Alias used from async wrappers (same behaviour)
