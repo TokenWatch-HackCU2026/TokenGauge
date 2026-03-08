@@ -450,9 +450,18 @@ class TokenGauge:
     @staticmethod
     def _extract_key_hint(client: Any) -> str | None:
         """Return last 4 chars of the provider API key, or None if not found."""
-        key = getattr(client, "api_key", None)
-        if key and len(key) >= 4:
-            return key[-4:]
+        # Try common attribute names across SDKs
+        for attr in ("api_key", "_api_key", "key"):
+            key = getattr(client, attr, None)
+            if key and isinstance(key, str) and len(key) >= 4:
+                return key[-4:]
+        # Google genai.Client stores it nested
+        for attr in ("_client_options", "_config", "_http_options"):
+            opts = getattr(client, attr, None)
+            if opts:
+                key = getattr(opts, "api_key", None)
+                if key and isinstance(key, str) and len(key) >= 4:
+                    return key[-4:]
         return None
 
     def _log(

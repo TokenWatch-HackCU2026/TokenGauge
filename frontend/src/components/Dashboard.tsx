@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend,
+  ScatterChart, Scatter, ZAxis,
 } from "recharts";
 import {
   fetchRecords, fetchSummary, fetchDashboardSummary,
@@ -198,11 +199,14 @@ function buildSeries(records: ApiCall[], dim: "provider" | "model" | "key", rang
 }
 
 // ─── Spend Over Time chart ─────────────────────────────────────────────────────
-function SpendChart({ records, timeseries, range }: { records: ApiCall[]; timeseries: TimeseriesPoint[]; range: string }) {
-  const [mode, setMode] = useState<"total" | "provider" | "model" | "key">("total");
-  const [selected, setSelected] = useState<string | null>(null);
+type SpendMode = "total" | "provider" | "model" | "key";
 
-  const toggleBtn = (label: string, val: typeof mode) => (
+function SpendChart({ records, timeseries, range }: { records: ApiCall[]; timeseries: TimeseriesPoint[]; range: string }) {
+  const [mode, setMode] = useState<SpendMode>("total");
+  const [selected, setSelected] = useState<string | null>(null);
+  const [showDots, setShowDots] = useState(false);
+
+  const toggleBtn = (label: string, val: SpendMode) => (
     <button
       key={val}
       onClick={() => { setMode(val); setSelected(null); }}
@@ -212,9 +216,40 @@ function SpendChart({ records, timeseries, range }: { records: ApiCall[]; timese
     </button>
   );
 
-  if (mode === "total") {
+  const controls = (
+    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+      {toggleBtn("Total","total")}
+      {toggleBtn("Provider","provider")}
+      {toggleBtn("Model","model")}
+      {toggleBtn("Key","key")}
+      <button
+        onClick={() => setShowDots(v => !v)}
+        style={{ background: showDots ? C.green : C.border, color: showDots ? "#fff" : C.muted, border: "none", borderRadius: 6, padding: "0.25rem 0.65rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}
+      >
+        Requests
+      </button>
+    </div>
+  );
+
+  // Scatter data: each record as an {x: epoch ms, y: cost, label: model/provider}
+  const scatterByDim: Record<string, { x: number; y: number; label: string }[]> = {};
+  if (showDots) {
+    for (const r of records) {
+      const dk = mode === "total" ? "all" : mode === "key" ? (r.key_hint ? `…${r.key_hint}` : "unknown") : r[mode];
+      if (!scatterByDim[dk]) scatterByDim[dk] = [];
+      scatterByDim[dk].push({ x: new Date(r.timestamp).getTime(), y: r.cost_usd, label: r.model });
+    }
+  }
+  const scatterKeys = Object.keys(scatterByDim);
+
+  const fmtXTick = (ms: number) => {
+    const d = new Date(ms);
+    return range === "24h" ? `${String(d.getHours()).padStart(2,"0")}:00` : `${d.getMonth()+1}/${d.getDate()}`;
+  };
+
+  if (mode === "total" && !showDots) {
     return (
-      <Card title="Spend over time" subtitle="USD per period" action={<div style={{ display: "flex", gap: 4 }}>{toggleBtn("Total","total")}{toggleBtn("Provider","provider")}{toggleBtn("Model","model")}{toggleBtn("Key","key")}</div>}>
+      <Card title="Spend over time" subtitle="USD per period" action={controls}>
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={timeseries}>
             <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
@@ -227,10 +262,54 @@ function SpendChart({ records, timeseries, range }: { records: ApiCall[]; timese
     );
   }
 
+  if (showDots) {
+    const xMin = records.length ? Math.min(...records.map(r => new Date(r.timestamp).getTime())) : 0;
+    const xMax = records.length ? Math.max(...records.map(r => new Date(r.timestamp).getTime())) : 0;
+    return (
+      <Card title="Spend over time" subtitle="Each dot = one request" action={controls}>
+        {records.length === 0 ? <EmptyState label="No data for this period" /> : (
+          <>
+            <ResponsiveContainer width="100%" height={220}>
+              <ScatterChart>
+                <XAxis type="number" dataKey="x" domain={[xMin, xMax]} tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtXTick} />
+                <YAxis type="number" dataKey="y" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} width={70} />
+                <ZAxis range={[40, 40]} />
+                <Tooltip
+                  contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
+                  cursor={{ strokeDasharray: "3 3" }}
+                  formatter={(v: number, name: string) => name === "y" ? [fmtCost(v), "Cost"] : [new Date(v as number).toLocaleString(), "Time"]}
+                />
+                {scatterKeys.map((k, i) => (
+                  <Scatter
+                    key={k}
+                    name={k}
+                    data={scatterByDim[k]}
+                    fill={LINE_COLORS[i % LINE_COLORS.length]}
+                    fillOpacity={selected === null || selected === k ? 0.85 : 0.15}
+                  />
+                ))}
+              </ScatterChart>
+            </ResponsiveContainer>
+            {scatterKeys.length > 1 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem 0.75rem", marginTop: "0.5rem" }}>
+                {scatterKeys.map((k, i) => (
+                  <button key={k} onClick={() => setSelected(selected === k ? null : k)} style={{ background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, padding: "2px 4px", borderRadius: 4, opacity: selected === null || selected === k ? 1 : 0.35 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: "50%", background: LINE_COLORS[i % LINE_COLORS.length], display: "inline-block", flexShrink: 0 }} />
+                    <span style={{ fontSize: "0.78rem", color: C.subtle }}>{k}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </Card>
+    );
+  }
+
   const { data, keys } = buildSeries(records, mode === "key" ? "key" : mode, range);
 
   return (
-    <Card title="Spend over time" subtitle="USD per period" action={<div style={{ display: "flex", gap: 4 }}>{toggleBtn("Total","total")}{toggleBtn("Provider","provider")}{toggleBtn("Model","model")}{toggleBtn("Key","key")}</div>}>
+    <Card title="Spend over time" subtitle="USD per period" action={controls}>
       {data.length === 0 ? <EmptyState label="No data for this period" /> : (
         <>
           <ResponsiveContainer width="100%" height={220}>
@@ -239,26 +318,13 @@ function SpendChart({ records, timeseries, range }: { records: ApiCall[]; timese
               <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} width={70} />
               <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} formatter={(v: number, name: string) => [fmtCost(v), name]} />
               {keys.map((k, i) => (
-                <Line
-                  key={k}
-                  type="monotone"
-                  dataKey={k}
-                  stroke={LINE_COLORS[i % LINE_COLORS.length]}
-                  strokeWidth={selected === null || selected === k ? 2.5 : 1}
-                  strokeOpacity={selected === null || selected === k ? 1 : 0.2}
-                  dot={false}
-                  name={k}
-                />
+                <Line key={k} type="monotone" dataKey={k} stroke={LINE_COLORS[i % LINE_COLORS.length]} strokeWidth={selected === null || selected === k ? 2.5 : 1} strokeOpacity={selected === null || selected === k ? 1 : 0.2} dot={false} name={k} />
               ))}
             </LineChart>
           </ResponsiveContainer>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem 0.75rem", marginTop: "0.5rem" }}>
             {keys.map((k, i) => (
-              <button
-                key={k}
-                onClick={() => setSelected(selected === k ? null : k)}
-                style={{ background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, padding: "2px 4px", borderRadius: 4, opacity: selected === null || selected === k ? 1 : 0.35 }}
-              >
+              <button key={k} onClick={() => setSelected(selected === k ? null : k)} style={{ background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, padding: "2px 4px", borderRadius: 4, opacity: selected === null || selected === k ? 1 : 0.35 }}>
                 <span style={{ width: 10, height: 10, borderRadius: "50%", background: LINE_COLORS[i % LINE_COLORS.length], display: "inline-block", flexShrink: 0 }} />
                 <span style={{ fontSize: "0.78rem", color: C.subtle }}>{k}</span>
               </button>
