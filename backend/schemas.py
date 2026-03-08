@@ -51,6 +51,7 @@ class ApiCallCreate(BaseModel):
     key_hint: Optional[str] = None
     prompt_type: Optional[str] = None
     complexity: Optional[int] = None
+    timestamp: Optional[datetime] = None
 
 
 class ApiCallOut(ApiCallCreate):

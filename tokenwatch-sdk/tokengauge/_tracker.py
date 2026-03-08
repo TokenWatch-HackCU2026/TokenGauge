@@ -12,6 +12,7 @@ import inspect
 import re
 import threading
 import time
+from datetime import datetime
 from typing import Any
 
 __all__ = ["TokenGauge"]
@@ -430,6 +431,7 @@ class TokenGauge:
             messages = kwargs.get("messages")
             start = time.monotonic()
             response = _orig(*args, **kwargs)
+            ts = datetime.now().astimezone().isoformat()
             latency_ms = int((time.monotonic() - start) * 1000)
             model = getattr(response, "model", None) or kwargs.get("model", "unknown")
             usage = getattr(response, "usage", None)
@@ -443,6 +445,7 @@ class TokenGauge:
                     app_tag=app_tag,
                     key_hint=key_hint,
                     messages=messages,
+                    timestamp=ts,
                 )
             return response
 
@@ -460,6 +463,7 @@ class TokenGauge:
             messages = kwargs.get("messages")
             start = time.monotonic()
             response = await _orig(*args, **kwargs)
+            ts = datetime.now().astimezone().isoformat()
             latency_ms = int((time.monotonic() - start) * 1000)
             model = getattr(response, "model", None) or kwargs.get("model", "unknown")
             usage = getattr(response, "usage", None)
@@ -473,6 +477,7 @@ class TokenGauge:
                     app_tag=app_tag,
                     key_hint=key_hint,
                     messages=messages,
+                    timestamp=ts,
                 )
             return response
 
@@ -494,6 +499,7 @@ class TokenGauge:
                 messages = [{"role": "system", "content": system}] + list(messages)
             start = time.monotonic()
             response = _orig(*args, **kwargs)
+            ts = datetime.now().astimezone().isoformat()
             latency_ms = int((time.monotonic() - start) * 1000)
             model = getattr(response, "model", None) or kwargs.get("model", "unknown")
             usage = getattr(response, "usage", None)
@@ -507,6 +513,7 @@ class TokenGauge:
                     app_tag=app_tag,
                     key_hint=key_hint,
                     messages=messages,
+                    timestamp=ts,
                 )
             return response
 
@@ -527,6 +534,7 @@ class TokenGauge:
                 messages = [{"role": "system", "content": system}] + list(messages)
             start = time.monotonic()
             response = await _orig(*args, **kwargs)
+            ts = datetime.now().astimezone().isoformat()
             latency_ms = int((time.monotonic() - start) * 1000)
             model = getattr(response, "model", None) or kwargs.get("model", "unknown")
             usage = getattr(response, "usage", None)
@@ -540,6 +548,7 @@ class TokenGauge:
                     app_tag=app_tag,
                     key_hint=key_hint,
                     messages=messages,
+                    timestamp=ts,
                 )
             return response
 
@@ -559,6 +568,7 @@ class TokenGauge:
             contents = kwargs.get("contents", args[1] if len(args) > 1 else None)
             start = time.monotonic()
             response = _orig(*args, **kwargs)
+            ts = datetime.now().astimezone().isoformat()
             latency_ms = int((time.monotonic() - start) * 1000)
             model_name = kwargs.get("model", args[0] if args else "gemini")
             if isinstance(model_name, str) and "/" in model_name:
@@ -574,6 +584,7 @@ class TokenGauge:
                     app_tag=app_tag,
                     key_hint=key_hint,
                     messages=contents,
+                    timestamp=ts,
                 )
             return response
 
@@ -596,6 +607,7 @@ class TokenGauge:
             contents = args[0] if args else kwargs.get("contents")
             start = time.monotonic()
             response = _orig(*args, **kwargs)
+            ts = datetime.now().astimezone().isoformat()
             latency_ms = int((time.monotonic() - start) * 1000)
             meta = getattr(response, "usage_metadata", None)
             if meta:
@@ -608,6 +620,7 @@ class TokenGauge:
                     app_tag=app_tag,
                     key_hint=key_hint,
                     messages=contents,
+                    timestamp=ts,
                 )
             return response
 
@@ -641,6 +654,7 @@ class TokenGauge:
         app_tag: str | None,
         key_hint: str | None = None,
         messages: Any = None,
+        timestamp: str | None = None,
     ) -> None:
         """Fire-and-forget: log in a background thread so the caller is never blocked."""
         # Classify locally before spawning the thread (prompt text stays here)
@@ -653,7 +667,7 @@ class TokenGauge:
         threading.Thread(
             target=self._send,
             args=(provider, model, tokens_in, tokens_out, latency_ms, app_tag,
-                  key_hint, prompt_type, complexity),
+                  key_hint, prompt_type, complexity, timestamp),
             daemon=False,
         ).start()
 
@@ -671,6 +685,7 @@ class TokenGauge:
         key_hint: str | None = None,
         prompt_type: str | None = None,
         complexity: int | None = None,
+        timestamp: str | None = None,
     ) -> None:
         import sys
         try:
@@ -690,6 +705,8 @@ class TokenGauge:
                 payload["prompt_type"] = prompt_type
             if complexity is not None:
                 payload["complexity"] = complexity
+            if timestamp is not None:
+                payload["timestamp"] = timestamp
 
             response = httpx.post(
                 f"{self.base_url}/usage/",
