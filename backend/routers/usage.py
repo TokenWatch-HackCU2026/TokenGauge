@@ -1,9 +1,14 @@
+import asyncio
+import json
+import os
+from datetime import datetime, timezone
 from typing import List
 
 from beanie import PydanticObjectId
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from jose import JWTError, jwt
 
 from auth import get_current_user
 from database import get_db
@@ -141,6 +146,49 @@ async def recalculate_costs(current_user: dict = Depends(get_current_user)):
             await doc.save()
             updated += 1
     return {"recalculated": updated}
+
+
+@router.websocket("/ws/live")
+async def live_usage(websocket: WebSocket, token: str):
+    """Push new records to the client every 2 s without polling from the browser."""
+    try:
+        payload = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=["HS256"])
+        uid = PydanticObjectId(payload["sub"])
+    except (JWTError, Exception):
+        await websocket.close(code=4001)
+        return
+
+    await websocket.accept()
+    last_seen = datetime.now(timezone.utc)
+    ping_counter = 0
+
+    try:
+        while True:
+            await asyncio.sleep(1)
+            ping_counter += 1
+            try:
+                new_docs = (
+                    await ApiCall.find(
+                        ApiCall.user_id == uid,
+                        {"timestamp": {"$gt": last_seen}},
+                    )
+                    .sort(-ApiCall.timestamp)
+                    .to_list()
+                )
+                if new_docs:
+                    last_seen = new_docs[0].timestamp
+                    await websocket.send_text(
+                        json.dumps([_to_out(d).model_dump(mode="json") for d in new_docs])
+                    )
+                elif ping_counter % 30 == 0:
+                    # Send a keep-alive ping every 30s to prevent Render proxy timeout
+                    await websocket.send_text("[]")
+            except WebSocketDisconnect:
+                raise
+            except Exception:
+                pass  # keep the loop running on transient DB/serialization errors
+    except WebSocketDisconnect:
+        pass
 
 
 def _to_out(doc: ApiCall) -> ApiCallOut:

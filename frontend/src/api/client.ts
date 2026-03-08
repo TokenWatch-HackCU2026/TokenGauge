@@ -240,3 +240,21 @@ export function regenerateSdkToken(): Promise<{ sdk_token: string }> {
 export function recalculateCosts(): Promise<{ recalculated: number }> {
   return post("/usage/recalculate-costs", {});
 }
+
+// ── Live WebSocket ─────────────────────────────────────────────────────────────
+
+export function createLiveSocket(onRecords: (records: ApiCall[]) => void): WebSocket {
+  const token = localStorage.getItem("access_token") ?? "";
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  // On Render, the static CDN drops WS upgrade headers, so connect directly to the API service.
+  // Derives tokengauge-api.onrender.com from tokengauge.onrender.com at runtime.
+  const wsHost = window.location.hostname.endsWith(".onrender.com")
+    ? window.location.hostname.replace(/^([^.]+)/, "$1-api")
+    : window.location.host;
+  const ws = new WebSocket(`${proto}//${wsHost}/usage/ws/live?token=${encodeURIComponent(token)}`);
+  ws.onmessage = (e) => {
+    const records: ApiCall[] = JSON.parse(e.data);
+    onRecords(records);
+  };
+  return ws;
+}

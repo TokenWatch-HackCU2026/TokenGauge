@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -8,6 +8,7 @@ import {
   fetchRecords, fetchSummary, fetchDashboardSummary,
   fetchBreakdown, fetchQuota,
   fetchSdkToken, regenerateSdkToken, recalculateCosts, updatePhone,
+  createLiveSocket,
   ApiCall, ApiCallSummary, BreakdownRow, UserOut,
 } from "../api/client";
 import { C, PROVIDER_COLORS, PIE_COLORS, LINE_COLORS, GaugeLogo } from "../theme";
@@ -81,6 +82,30 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
     queryFn: fetchQuota,
   });
 
+  // ── Live WebSocket ───────────────────────────────────────────────────────────
+  const [liveRecords, setLiveRecords] = useState<ApiCall[]>([]);
+  const [isLive, setIsLive] = useState(false);
+
+  useEffect(() => {
+    const ws = createLiveSocket((newRecs) => {
+      setLiveRecords(prev => {
+        const existingIds = new Set(prev.map(r => r.id));
+        const fresh = newRecs.filter(r => !existingIds.has(r.id));
+        return [...fresh, ...prev].slice(0, 200);
+      });
+    });
+    ws.onopen = () => setIsLive(true);
+    ws.onclose = () => setIsLive(false);
+    ws.onerror = () => setIsLive(false);
+    return () => ws.close();
+  }, []);
+
+  // Merge live records with fetched, deduplicated, newest first
+  const allRecords = [...liveRecords, ...records].reduce<ApiCall[]>((acc, r) => {
+    if (!acc.find(x => x.id === r.id)) acc.push(r);
+    return acc;
+  }, []);
+
   return (
     <div style={{ display: "flex", height: "100vh", background: C.bg, color: C.text, fontFamily: "'Inter', system-ui, sans-serif", overflow: "hidden" }}>
       {/* ── Sidebar ── */}
@@ -143,34 +168,37 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
           <h1 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 600 }}>
             {NAV_ITEMS.find(n => n.id === page)?.label}
           </h1>
-          <div style={{ display: "flex", alignItems: "center", gap: 2, background: C.bg, borderRadius: 8, padding: 3 }}>
-            {RANGES.map(r => (
-              <button
-                key={r}
-                onClick={() => setRange(r)}
-                style={{
-                  background: range === r ? C.accent : "transparent",
-                  color: range === r ? "#fff" : C.muted,
-                  border: "none",
-                  borderRadius: 6,
-                  padding: "0.35rem 0.7rem",
-                  fontSize: "0.78rem",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  transition: "all 0.12s",
-                }}
-              >
-                {r === "live" ? "Live" : r}
-              </button>
-            ))}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 2, background: C.bg, borderRadius: 8, padding: 3 }}>
+              {RANGES.map(r => (
+                <button
+                  key={r}
+                  onClick={() => setRange(r)}
+                  style={{
+                    background: range === r ? C.accent : "transparent",
+                    color: range === r ? "#fff" : C.muted,
+                    border: "none",
+                    borderRadius: 6,
+                    padding: "0.35rem 0.7rem",
+                    fontSize: "0.78rem",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    transition: "all 0.12s",
+                  }}
+                >
+                  {r === "live" ? "Live" : r}
+                </button>
+              ))}
+            </div>
+            <Pill color={isLive ? C.green : C.muted}>{isLive ? "● Live" : "○ Connecting…"}</Pill>
           </div>
         </header>
 
         <div style={{ flex: 1, padding: "1.75rem 2rem", overflow: "auto" }}>
           {page === "overview" && (
-            <OverviewPage summary={summary} records={records} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} gran={gran} />
+            <OverviewPage summary={summary} records={allRecords} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} gran={gran} range={range} />
           )}
-          {page === "usage" && <UsagePage summary={summary} records={records} loading={isLoading} />}
+          {page === "usage" && <UsagePage summary={summary} records={allRecords} loading={isLoading} />}
           {page === "settings" && <SettingsPage quota={quota} user={user} />}
         </div>
       </main>
@@ -181,62 +209,110 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
 // ─── Chart helpers ─────────────────────────────────────────────────────────────
 
 type Granularity = "hour" | "day" | "week" | "month";
+const pad2 = (n: number) => String(n).padStart(2, "0");
 
-// Returns { sort: sortable ISO-ish key, label: human-friendly display } in browser local time
-function bucketInfo(ts: string, gran: Granularity): { sort: string; label: string } {
-  const d = new Date(ts); // UTC string → local Date
-  const pad = (n: number) => String(n).padStart(2, "0");
+// Returns { sort: sortable key, label: display label } in browser local time
+function bucketInfoFromDate(d: Date, gran: Granularity): { sort: string; label: string } {
   const Y = d.getFullYear(), M = d.getMonth(), D = d.getDate(), H = d.getHours();
-
   switch (gran) {
     case "hour":
-      return {
-        sort: `${Y}-${pad(M+1)}-${pad(D)}T${pad(H)}`,
-        label: `${M+1}/${D} ${pad(H)}:00`,
-      };
+      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}T${pad2(H)}`, label: `${M+1}/${D} ${pad2(H)}:00` };
     case "day":
-      return {
-        sort: `${Y}-${pad(M+1)}-${pad(D)}`,
-        label: `${M+1}/${D}`,
-      };
+      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}`, label: `${M+1}/${D}` };
     case "week": {
       const dow = d.getDay();
       const mon = new Date(d);
       mon.setDate(D - dow + (dow === 0 ? -6 : 1));
       const wY = mon.getFullYear(), wM = mon.getMonth(), wD = mon.getDate();
-      return {
-        sort: `${wY}-${pad(wM+1)}-${pad(wD)}`,
-        label: `Wk ${wM+1}/${wD}`,
-      };
+      return { sort: `${wY}-${pad2(wM+1)}-${pad2(wD)}`, label: `Wk ${wM+1}/${wD}` };
     }
     case "month":
-      return {
-        sort: `${Y}-${pad(M+1)}`,
-        label: d.toLocaleString("default", { month: "short", year: "numeric" }),
-      };
+      return { sort: `${Y}-${pad2(M+1)}`, label: d.toLocaleString("default", { month: "short", year: "numeric" }) };
   }
+}
+
+function bucketInfo(ts: string, gran: Granularity) {
+  return bucketInfoFromDate(new Date(ts), gran);
+}
+
+// Generate every bucket in a range so the X-axis is continuous (zeros where no data)
+function generateTimeline(range: Range, gran: Granularity): { sort: string; label: string }[] {
+  const now = new Date();
+  let start: Date;
+
+  if (range === "ALL") {
+    // Go back 12 months
+    start = new Date(now);
+    start.setMonth(start.getMonth() - 12);
+  } else if (range === "YTD") {
+    start = new Date(now.getFullYear(), 0, 1);
+  } else {
+    const msMap: Record<string, number> = {
+      live: 3_600_000, "1D": 86_400_000, "1W": 7 * 86_400_000,
+      "1M": 30 * 86_400_000, "3M": 90 * 86_400_000, "1Y": 365 * 86_400_000,
+    };
+    start = new Date(now.getTime() - (msMap[range] ?? 86_400_000));
+  }
+
+  const timeline: { sort: string; label: string }[] = [];
+  const seen = new Set<string>();
+  const cursor = new Date(start);
+
+  // Align cursor to bucket boundary
+  if (gran === "hour") { cursor.setMinutes(0, 0, 0); }
+  else if (gran === "day") { cursor.setHours(0, 0, 0, 0); }
+  else if (gran === "week") {
+    cursor.setHours(0, 0, 0, 0);
+    const dow = cursor.getDay();
+    cursor.setDate(cursor.getDate() - dow + (dow === 0 ? -6 : 1));
+  }
+  else if (gran === "month") { cursor.setDate(1); cursor.setHours(0, 0, 0, 0); }
+
+  while (cursor <= now) {
+    const info = bucketInfoFromDate(cursor, gran);
+    if (!seen.has(info.sort)) {
+      seen.add(info.sort);
+      timeline.push(info);
+    }
+    // Advance cursor
+    if (gran === "hour") cursor.setHours(cursor.getHours() + 1);
+    else if (gran === "day") cursor.setDate(cursor.getDate() + 1);
+    else if (gran === "week") cursor.setDate(cursor.getDate() + 7);
+    else cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return timeline;
 }
 
 // ─── Model Usage Line Chart ──────────────────────────────────────────────────
 type UsageMetric = "cost" | "requests" | "tokens";
 
-function ModelUsageChart({ records, gran }: { records: ApiCall[]; gran: Granularity }) {
+function ModelUsageChart({ records, gran, range }: { records: ApiCall[]; gran: Granularity; range: Range }) {
   const [metric, setMetric] = useState<UsageMetric>("cost");
   const [selected, setSelected] = useState<string | null>(null);
 
-  // Bucket records by time × model (local timezone)
-  const buckets: Record<string, { label: string; values: Record<string, number> }> = {};
+  // 1. Build full timeline with every bucket
+  const timeline = generateTimeline(range, gran);
+
+  // 2. Fill in record values
+  const filled: Record<string, Record<string, number>> = {};
+  for (const { sort } of timeline) filled[sort] = {};
+
   const models = new Set<string>();
   for (const r of records) {
-    const { sort, label } = bucketInfo(r.timestamp, gran);
+    const { sort } = bucketInfo(r.timestamp, gran);
     models.add(r.model);
-    if (!buckets[sort]) buckets[sort] = { label, values: {} };
+    if (!filled[sort]) filled[sort] = {}; // record outside timeline edge
     const val = metric === "cost" ? r.cost_usd : metric === "requests" ? 1 : r.tokens_in + r.tokens_out;
-    buckets[sort].values[r.model] = (buckets[sort].values[r.model] ?? 0) + val;
+    filled[sort][r.model] = (filled[sort][r.model] ?? 0) + val;
   }
-  const sortedKeys = Object.keys(buckets).sort();
-  const data = sortedKeys.map(k => ({ date: buckets[k].label, ...buckets[k].values }));
+
+  // 3. Build chart data — timeline order, zeros for missing models
   const modelList = Array.from(models);
+  const data = timeline.map(({ sort, label }) => {
+    const row: Record<string, string | number> = { date: label };
+    for (const m of modelList) row[m] = filled[sort]?.[m] ?? 0;
+    return row;
+  });
 
   const subtitles: Record<UsageMetric, string> = { cost: "USD per period", requests: "Requests per period", tokens: "Tokens per period" };
 
@@ -322,13 +398,14 @@ function CostPieChart({ breakdown }: { breakdown: BreakdownRow[] }) {
 }
 
 // ─── Overview ─────────────────────────────────────────────────────────────────
-function OverviewPage({ summary, records, breakdown, dashSummary, loading, gran }: {
+function OverviewPage({ summary, records, breakdown, dashSummary, loading, gran, range }: {
   summary: ApiCallSummary[];
   records: ApiCall[];
   breakdown: BreakdownRow[];
   dashSummary: { total_tokens_in: number; total_tokens_out: number; total_cost_usd: number; request_count: number; avg_latency_ms: number } | undefined;
   loading: boolean;
   gran: Granularity;
+  range: Range;
 }) {
   return (
     <div>
@@ -340,7 +417,7 @@ function OverviewPage({ summary, records, breakdown, dashSummary, loading, gran 
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem", marginBottom: "1.5rem" }}>
-        <ModelUsageChart records={records} gran={gran} />
+        <ModelUsageChart records={records} gran={gran} range={range} />
         <CostPieChart breakdown={breakdown} />
       </div>
 
@@ -578,7 +655,7 @@ function RequestsTable({ records }: { records: ApiCall[] }) {
         <tbody>
           {records.map(r => (
             <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-              <td style={tdStyle}>{new Date(r.timestamp).toLocaleString()}</td>
+              <td style={tdStyle}>{new Date(r.timestamp).toLocaleString(undefined, { timeZoneName: 'short' })}</td>
               <td style={tdStyle}><ProviderBadge provider={r.provider} small /></td>
               <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: "0.8rem" }}>{r.model}</td>
               <td style={{ ...tdStyle, color: C.muted }}>{r.app_tag ?? "—"}</td>
