@@ -37,7 +37,6 @@ async def seed() -> None:
     await connect_db()
 
     from beanie import PydanticObjectId
-    dev_uid = PydanticObjectId(_DEV_USER_ID_STR)
 
     # ── User ─────────────────────────────────────────────────────────────────
     user = await User.find_one(User.email == TEST_EMAIL)
@@ -52,14 +51,16 @@ async def seed() -> None:
     else:
         print(f"[seed] User already exists -> {user.id}")
 
+    uid = user.id
+
     # ── Fake api_calls ────────────────────────────────────────────────────────
     force = "--force" in sys.argv
-    existing = await ApiCall.find(ApiCall.user_id == dev_uid).count()
+    existing = await ApiCall.find(ApiCall.user_id == uid).count()
     if existing > 0 and not force:
         print(f"[seed] {existing} api_calls already exist — run with --force to reseed")
     else:
         if existing > 0:
-            await ApiCall.find(ApiCall.user_id == dev_uid).delete()
+            await ApiCall.find(ApiCall.user_id == uid).delete()
             print(f"[seed] Deleted {existing} existing api_calls")
         now = datetime.now(timezone.utc)
         calls = []
@@ -71,7 +72,7 @@ async def seed() -> None:
                 tokens_in  = random.randint(200, 4000)
                 tokens_out = random.randint(100, 2000)
                 calls.append(ApiCall(
-                    user_id=dev_uid,
+                    user_id=uid,
                     provider=provider,
                     model=model,
                     tokens_in=tokens_in,
