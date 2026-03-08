@@ -161,7 +161,7 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
 
         <div style={{ flex: 1, padding: "1.75rem 2rem", overflow: "auto" }}>
           {page === "overview" && (
-            <OverviewPage summary={summary} records={records} timeseries={timeseries} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} />
+            <OverviewPage summary={summary} records={records} timeseries={timeseries} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} range={range} />
           )}
           {page === "usage" && <UsagePage summary={summary} records={records} loading={isLoading} />}
           {page === "settings" && <SettingsPage quota={quota} />}
@@ -171,22 +171,152 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
   );
 }
 
+// ─── Chart helpers ─────────────────────────────────────────────────────────────
+const LINE_COLORS = ["#6366f1","#10b981","#f59e0b","#ef4444","#06b6d4","#8b5cf6","#ec4899","#84cc16"];
+
+function bucketKey(ts: string, range: string): string {
+  const d = new Date(ts);
+  if (range === "24h") {
+    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:00`;
+  }
+  return `${d.getMonth()+1}/${d.getDate()}`;
+}
+
+function buildSeries(records: ApiCall[], dim: "provider" | "model" | "key", range: string) {
+  const buckets: Record<string, Record<string, number>> = {};
+  const keys = new Set<string>();
+  for (const r of records) {
+    const bk = bucketKey(r.timestamp, range);
+    const dk = dim === "key" ? (r.key_hint ? `…${r.key_hint}` : "unknown") : r[dim];
+    keys.add(dk);
+    if (!buckets[bk]) buckets[bk] = {};
+    buckets[bk][dk] = (buckets[bk][dk] ?? 0) + r.cost_usd;
+  }
+  const sortedBuckets = Object.keys(buckets).sort();
+  const data = sortedBuckets.map(bk => ({ date: bk, ...buckets[bk] }));
+  return { data, keys: Array.from(keys) };
+}
+
+// ─── Spend Over Time chart ─────────────────────────────────────────────────────
+function SpendChart({ records, timeseries, range }: { records: ApiCall[]; timeseries: TimeseriesPoint[]; range: string }) {
+  const [mode, setMode] = useState<"total" | "provider" | "model" | "key">("total");
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const toggleBtn = (label: string, val: typeof mode) => (
+    <button
+      key={val}
+      onClick={() => { setMode(val); setSelected(null); }}
+      style={{ background: mode === val ? C.accent : C.border, color: mode === val ? "#fff" : C.muted, border: "none", borderRadius: 6, padding: "0.25rem 0.65rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}
+    >
+      {label}
+    </button>
+  );
+
+  if (mode === "total") {
+    return (
+      <Card title="Spend over time" subtitle="USD per period" action={<div style={{ display: "flex", gap: 4 }}>{toggleBtn("Total","total")}{toggleBtn("Provider","provider")}{toggleBtn("Model","model")}{toggleBtn("Key","key")}</div>}>
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={timeseries}>
+            <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} width={70} />
+            <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} formatter={(v: number) => [fmtCost(v), "Cost"]} />
+            <Line type="monotone" dataKey="cost_usd" stroke={C.accent} strokeWidth={2.5} dot={false} name="Total" />
+          </LineChart>
+        </ResponsiveContainer>
+      </Card>
+    );
+  }
+
+  const { data, keys } = buildSeries(records, mode === "key" ? "key" : mode, range);
+
+  return (
+    <Card title="Spend over time" subtitle="USD per period" action={<div style={{ display: "flex", gap: 4 }}>{toggleBtn("Total","total")}{toggleBtn("Provider","provider")}{toggleBtn("Model","model")}{toggleBtn("Key","key")}</div>}>
+      {data.length === 0 ? <EmptyState label="No data for this period" /> : (
+        <>
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={data}>
+              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} width={70} />
+              <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} formatter={(v: number, name: string) => [fmtCost(v), name]} />
+              {keys.map((k, i) => (
+                <Line
+                  key={k}
+                  type="monotone"
+                  dataKey={k}
+                  stroke={LINE_COLORS[i % LINE_COLORS.length]}
+                  strokeWidth={selected === null || selected === k ? 2.5 : 1}
+                  strokeOpacity={selected === null || selected === k ? 1 : 0.2}
+                  dot={false}
+                  name={k}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem 0.75rem", marginTop: "0.5rem" }}>
+            {keys.map((k, i) => (
+              <button
+                key={k}
+                onClick={() => setSelected(selected === k ? null : k)}
+                style={{ background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, padding: "2px 4px", borderRadius: 4, opacity: selected === null || selected === k ? 1 : 0.35 }}
+              >
+                <span style={{ width: 10, height: 10, borderRadius: "50%", background: LINE_COLORS[i % LINE_COLORS.length], display: "inline-block", flexShrink: 0 }} />
+                <span style={{ fontSize: "0.78rem", color: C.subtle }}>{k}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
+// ─── Cost breakdown pie ────────────────────────────────────────────────────────
+function CostPieChart({ breakdown, records }: { breakdown: BreakdownRow[]; records: ApiCall[] }) {
+  const [mode, setMode] = useState<"provider" | "key">("provider");
+
+  const toggleBtn = (label: string, val: typeof mode) => (
+    <button
+      key={val}
+      onClick={() => setMode(val)}
+      style={{ background: mode === val ? C.accent : C.border, color: mode === val ? "#fff" : C.muted, border: "none", borderRadius: 6, padding: "0.25rem 0.65rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}
+    >
+      {label}
+    </button>
+  );
+
+  const pieData = mode === "provider"
+    ? Object.entries(breakdown.reduce<Record<string, number>>((acc, r) => { acc[r.provider] = (acc[r.provider] ?? 0) + r.cost_usd; return acc; }, {})).map(([name, value]) => ({ name, value }))
+    : Object.entries(records.reduce<Record<string, number>>((acc, r) => { const k = r.key_hint ? `…${r.key_hint}` : "unknown"; acc[k] = (acc[k] ?? 0) + r.cost_usd; return acc; }, {})).map(([name, value]) => ({ name, value }));
+
+  return (
+    <Card title="Cost breakdown" subtitle="% share" action={<div style={{ display: "flex", gap: 4 }}>{toggleBtn("Provider","provider")}{toggleBtn("Key","key")}</div>}>
+      {pieData.length > 0 ? (
+        <ResponsiveContainer width="100%" height={220}>
+          <PieChart>
+            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3}>
+              {pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+            </Pie>
+            <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} formatter={(v: number) => [fmtCost(v), "Cost"]} />
+            <Legend iconType="circle" iconSize={8} formatter={v => <span style={{ color: C.subtle, fontSize: 12 }}>{v}</span>} />
+          </PieChart>
+        </ResponsiveContainer>
+      ) : (
+        <EmptyState label="No data yet" />
+      )}
+    </Card>
+  );
+}
+
 // ─── Overview ─────────────────────────────────────────────────────────────────
-function OverviewPage({ summary, records, timeseries, breakdown, dashSummary, loading }: {
+function OverviewPage({ summary, records, timeseries, breakdown, dashSummary, loading, range }: {
   summary: ApiCallSummary[];
   records: ApiCall[];
   timeseries: TimeseriesPoint[];
   breakdown: BreakdownRow[];
   dashSummary: { total_tokens_in: number; total_tokens_out: number; total_cost_usd: number; request_count: number; avg_latency_ms: number } | undefined;
   loading: boolean;
+  range: string;
 }) {
-  const providerPie = Object.entries(
-    breakdown.reduce<Record<string, number>>((acc, r) => {
-      acc[r.provider] = (acc[r.provider] ?? 0) + r.cost_usd;
-      return acc;
-    }, {})
-  ).map(([name, value]) => ({ name, value }));
-
   return (
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "1rem", marginBottom: "1.5rem" }}>
@@ -197,38 +327,8 @@ function OverviewPage({ summary, records, timeseries, breakdown, dashSummary, lo
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem", marginBottom: "1.5rem" }}>
-        <Card title="Spend over time" subtitle="USD per period">
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={timeseries}>
-              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 12 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: C.muted, fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} />
-              <Tooltip
-                contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
-                formatter={(v: number) => [fmtCost(v), "Cost"]}
-              />
-              <Line type="monotone" dataKey="cost_usd" stroke={C.accent} strokeWidth={2.5} dot={false} name="Cost" />
-            </LineChart>
-          </ResponsiveContainer>
-        </Card>
-
-        <Card title="Cost by provider" subtitle="% share">
-          {providerPie.length > 0 ? (
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie data={providerPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3}>
-                  {providerPie.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
-                  formatter={(v: number) => [fmtCost(v), "Cost"]}
-                />
-                <Legend iconType="circle" iconSize={8} formatter={v => <span style={{ color: C.subtle, fontSize: 12 }}>{v}</span>} />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <EmptyState label="No data yet" />
-          )}
-        </Card>
+        <SpendChart records={records} timeseries={timeseries} range={range} />
+        <CostPieChart breakdown={breakdown} records={records} />
       </div>
 
       <div style={{ marginBottom: "1.5rem" }}>
@@ -238,10 +338,7 @@ function OverviewPage({ summary, records, timeseries, breakdown, dashSummary, lo
               <BarChart data={breakdown} barSize={28}>
                 <XAxis dataKey="model" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} />
-                <Tooltip
-                  contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
-                  formatter={(v: number) => [fmtCost(v), "Cost"]}
-                />
+                <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} formatter={(v: number) => [fmtCost(v), "Cost"]} />
                 <Bar dataKey="cost_usd" fill={C.accent} radius={[4, 4, 0, 0]} name="Cost (USD)" />
               </BarChart>
             </ResponsiveContainer>
