@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import connect_db, disconnect_db
-from routers import auth, usage, dashboard, keys
+from routers import auth, usage, dashboard, keys, proxy
 
 
 @asynccontextmanager
@@ -28,6 +28,7 @@ app.include_router(auth.router)
 app.include_router(usage.router)
 app.include_router(dashboard.router)
 app.include_router(keys.router)
+app.include_router(proxy.router)
 
 
 @app.get("/health")

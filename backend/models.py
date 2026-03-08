@@ -70,6 +70,8 @@ class ApiCall(Document):
     cost_usd: float
     latency_ms: int
     app_tag: Optional[str] = None
+    complexity: Optional[int] = None
+    prompt_type: Optional[str] = None
     timestamp: datetime = Field(default_factory=_utcnow)
 
     class Settings:

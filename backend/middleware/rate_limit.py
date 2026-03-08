@@ -1,64 +1,59 @@
-import sys
-from pathlib import Path
+"""
+Rate limit dependency — kept for backwards-compat.
+The proxy router does its own quota enforcement via redis_client directly.
+This module is a thin wrapper re-exported for any route that wants to
+apply rate-limiting as a FastAPI dependency.
+"""
 
-# Ensure the root directory (where the `redis` folder lives) is in sys.path
-sys.path.append(str(Path(__file__).resolve().parent.parent))
+import logging
+from datetime import datetime, timezone
 
-from fastapi import Request, HTTPException, status
-from redis.client import get_redis
-from redis.rate_limiter import check_rate_limit, DEFAULT_LIMIT, DEFAULT_WINDOW_MS
+from fastapi import HTTPException, Request, status
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_LIMIT = 1_000_000   # tokens per day
+DEFAULT_WINDOW_MS = 86_400_000  # 24 h in ms
 
 
 async def rate_limit_middleware(request: Request):
     """
-    Dependency or middleware function to enforce rate limiting on specific routes.
-    Extracts the user ID from the request state (set by the auth middleware)
-    and checks if they have exceeded their quota.
-
-    Usage as a dependency:
-        from middleware.rate_limit import rate_limit_middleware
-        from fastapi import Depends
-
-        @router.post("/proxy/...")
-        async def proxy_endpoint(
-            request: Request,
-            _=Depends(rate_limit_middleware)
-        ):
-            ...
+    FastAPI dependency that enforces the daily token quota.
+    Fail-open: if Redis is unavailable the request proceeds.
     """
-    # Assuming user_id is injected into request.state.user by the auth middleware (Partner 1)
+    from redis_client import get_redis
+
     user = getattr(request.state, "user", None)
     if not user or "user_id" not in user:
-        # If there's no auth, we can't rate limit by user.
-        # Fallback to rate limiting by IP, or just allow it if auth is mandatory elsewhere.
-        client_ip = request.client.host if request.client else "unknown"
-        user_id = f"ip_{client_ip}"
-    else:
-        user_id = user["user_id"]
+        return None  # unauthenticated — JWT middleware handles rejection
+
+    user_id = user["user_id"]
 
     try:
-        redis = get_redis()
-        # TODO: Lookup user's specific tier limits from DB if needed
-        limit_result = await check_rate_limit(redis, user_id=user_id)
+        r = await get_redis()
+        if r is None:
+            return None  # fail open
 
-        if not limit_result["allowed"]:
-            reset_at_s = limit_result["reset_at"] // 1000
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        key = f"quota:{user_id}:{today}"
+        used = await r.get(key)
+        used = int(used) if used else 0
+
+        if used >= DEFAULT_LIMIT:
+            reset_epoch = int(
+                datetime.now(timezone.utc)
+                .replace(hour=0, minute=0, second=0, microsecond=0)
+                .timestamp()
+                + 86400
+            )
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Rate limit exceeded. Please try again later.",
-                headers={
-                    "Retry-After": str(reset_at_s),
-                    "X-RateLimit-Remaining": str(limit_result["remaining"]),
-                },
+                detail="Daily token quota exceeded. Resets at midnight UTC.",
+                headers={"Retry-After": str(reset_epoch)},
             )
-
-        # Optional: Add remaining capacity headers to the response afterwards, 
-        # but since this is a dependency pre-request, we only block here.
+    except HTTPException:
+        raise
     except Exception as exc:
-        if isinstance(exc, HTTPException):
-            raise
-        # If Redis is unavailable, NFR-R2 says: fail open (allow request) with alert
-        import logging
-        logging.getLogger(__name__).warning("Active rate limiting bypassed due to Redis error: %s", exc)
+        logger.warning("Rate limit check failed (fail-open): %s", exc)
 
     return None

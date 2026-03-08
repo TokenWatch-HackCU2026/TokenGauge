@@ -10,6 +10,7 @@ export default defineConfig({
       "/dashboard": "http://localhost:8000",
       "/api": "http://localhost:8000",
       "/health": "http://localhost:8000",
+      "/proxy": "http://localhost:8000",
     },
   },
 });
