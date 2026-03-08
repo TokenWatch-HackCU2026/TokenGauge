@@ -1,7 +1,7 @@
 """
 TokenGauge SDK — Live Demo
 ==========================
-Showcases wrapping, model recommendations, app tags, and bulk usage generation.
+Interactive demo with pauses between each step.
 
     python demo.py
 
@@ -20,7 +20,7 @@ load_dotenv()
 import openai
 import anthropic
 from google import genai
-from tokengauge import TokenGauge
+from tokengauge import TokenGauge, BudgetExceededError
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -29,173 +29,324 @@ ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY")
 GOOGLE_KEY    = os.getenv("GOOGLE_API_KEY")
 TG_TOKEN      = os.getenv("TOKENGAUGE_TOKEN")
 
-BULK_CALLS = 50  # number of calls in the bulk generation phase
+BULK_CALLS = 50
 
 OPENAI_MODELS = [
-    ("gpt-4o",      100),
-    ("gpt-4o-mini", 200),
-    ("gpt-4.1",     100),
+    ("gpt-4o",       100),
+    ("gpt-4o-mini",  200),
+    ("gpt-4.1",      100),
     ("gpt-4.1-mini", 150),
-    ("gpt-4.1-nano", 80),
+    ("gpt-4.1-nano",  80),
 ]
 
 ANTHROPIC_MODELS = [
-    ("claude-haiku-4-5-20251001", 200),
+    ("claude-haiku-4-5-20251001",  200),
     ("claude-3-5-sonnet-20241022", 100),
 ]
 
 TAGS = ["prod", "staging", "dev", "chatbot", "batch-jobs", "summarizer", "internal-tools"]
 
 PROMPTS = [
-    ("What is machine learning?",                                        "chat"),
-    ("Write a haiku about Python.",                                      "creative"),
-    ("Explain REST APIs in one sentence.",                               "chat"),
-    ("What is the difference between SQL and NoSQL?",                    "analysis"),
-    ("Give me a fun fact about space.",                                   "chat"),
-    ("Write a Python function to sort a list of dicts by key.",          "code"),
-    ("Summarize the benefits of microservices architecture.",            "summarization"),
-    ("Translate 'hello world' into 5 languages.",                        "translation"),
-    ("Compare TCP vs UDP in 3 bullet points.",                           "analysis"),
-    ("Write a regex to validate email addresses.",                       "code"),
-    ("Explain the CAP theorem simply.",                                  "chat"),
-    ("What are the SOLID principles?",                                   "code"),
-    ("Write a limerick about debugging.",                                "creative"),
-    ("List 3 pros and 3 cons of serverless.",                            "analysis"),
-    ("How does garbage collection work in Java?",                        "code"),
+    "What is machine learning?",
+    "Write a haiku about Python.",
+    "Explain REST APIs in one sentence.",
+    "What is the difference between SQL and NoSQL?",
+    "Give me a fun fact about space.",
+    "Write a Python function to sort a list of dicts by key.",
+    "Summarize the benefits of microservices architecture.",
+    "Translate 'hello world' into 5 languages.",
+    "Compare TCP vs UDP in 3 bullet points.",
+    "Write a regex to validate email addresses.",
+    "Explain the CAP theorem simply.",
+    "What are the SOLID principles?",
+    "Write a limerick about debugging.",
+    "List 3 pros and 3 cons of serverless.",
+    "How does garbage collection work in Java?",
 ]
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-W = 60  # print width
+W = 62
 
-def header(num, title):
-    print(f"\n{'=' * W}")
-    print(f"  {num}. {title}")
-    print(f"{'=' * W}\n")
+def banner(text):
+    pad = W - 4
+    print()
+    print(f"  ╔{'═' * pad}╗")
+    print(f"  ║{text:^{pad}}║")
+    print(f"  ╚{'═' * pad}╝")
+    print()
 
-def status(label, ok):
-    return f"  {label:<18} {'loaded' if ok else 'MISSING'}"
+def step(num, title):
+    print()
+    print(f"  ┌{'─' * (W - 4)}┐")
+    print(f"  │  STEP {num}: {title:<{W - 13}}│")
+    print(f"  └{'─' * (W - 4)}┘")
+    print()
+
+def pause(msg="Press ENTER to continue..."):
+    print(f"\n  >> {msg}")
+    input("  >> ")
+    print()
+
+def ok(text):
+    print(f"  [OK] {text}")
+
+def info(text):
+    print(f"       {text}")
+
+def warn(text):
+    print(f"  [!!] {text}")
+
+def status(label, val):
+    dot = "loaded" if val else "MISSING"
+    return f"  {'*' if val else ' '} {label:<16} {dot}"
 
 def bar(current, total, width=30):
     pct = current / total
     filled = int(width * pct)
     return f"[{'#' * filled}{'-' * (width - filled)}] {current}/{total}"
 
+def print_rec(label, rec):
+    best = rec["best_overall"]
+    within = rec.get("within_provider")
+    wp = f"  within={within['model']}" if within else ""
+    print(f"    {label:<10} {rec['prompt_type']:<14} cplx={rec['complexity']}  "
+          f"{best['model']} ({best['success_probability']:.0%}, ${best['estimated_cost_usd']:.5f})"
+          f"{wp}")
+
 # ─── Init ─────────────────────────────────────────────────────────────────────
 
-print()
-print("  ╔════════════════════════════════════════╗")
-print("  ║        TokenGauge SDK — Live Demo      ║")
-print("  ╚════════════════════════════════════════╝")
-print()
-print(status("OpenAI",    OPENAI_KEY))
-print(status("Anthropic", ANTHROPIC_KEY))
-print(status("Google",    GOOGLE_KEY))
+banner("TokenGauge SDK  —  Live Demo")
+
+print(status("OpenAI",     OPENAI_KEY))
+print(status("Anthropic",  ANTHROPIC_KEY))
+print(status("Google",     GOOGLE_KEY))
 print(status("TokenGauge", TG_TOKEN))
 print()
 
 if not TG_TOKEN:
-    print("  ERROR: TOKENGAUGE_TOKEN is required. Add it to your .env")
+    warn("TOKENGAUGE_TOKEN is required. Add it to your .env")
     sys.exit(1)
 
 tw = TokenGauge(token=TG_TOKEN)
-print("  Connected to TokenGauge!")
+ok("Connected to TokenGauge!")
 
-# ─── 1. Model Recommendations ────────────────────────────────────────────────
+pause("Ready to begin the demo?")
 
-header(1, "MODEL RECOMMENDATIONS  (local — no API call)")
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 1: Hit the spend limit
+# ═══════════════════════════════════════════════════════════════════════════════
 
-rec = tw.recommend_model(
-    messages=[{"role": "user", "content": "What is the capital of France?"}],
-)
-print(f"  Prompt:       \"What is the capital of France?\"")
-print(f"  Type:         {rec['prompt_type']}  |  Complexity: {rec['complexity']}/10")
-print(f"  Best model:   {rec['best_overall']['model']}  ({rec['best_overall']['provider']})")
-print(f"  Est. cost:    ${rec['best_overall']['estimated_cost_usd']:.5f}")
-print(f"  Success:      {rec['best_overall']['success_probability']:.0%}")
+step(1, "SPEND LIMIT ENFORCEMENT")
 
-rec = tw.recommend_model(
-    messages=[{"role": "user", "content":
-        "Refactor this Python class to use dataclasses, add type hints, "
-        "implement __eq__ and __hash__, write comprehensive pytest tests."
-    }],
-    provider="anthropic",
-    budget_usd=0.10,
-)
-print(f"\n  Prompt:       \"Refactor Python class...\" (complex code)")
-print(f"  Type:         {rec['prompt_type']}  |  Complexity: {rec['complexity']}/10")
-print(f"  Best overall: {rec['best_overall']['model']}  (${rec['best_overall']['estimated_cost_usd']:.5f})")
-print(f"  Best Anthr.:  {rec['within_provider']['model']}  (${rec['within_provider']['estimated_cost_usd']:.5f})")
-
-print(f"\n  {'Category':<16} {'Cplx':<6} {'Best Model':<26} {'Cost':<12} {'P(ok)'}")
-print(f"  {'─' * 70}")
-categories = [
-    ("Hey, how's it going?",                                                "chat"),
-    ("Write a BST in Rust with insert, delete, balance",                    "code"),
-    ("Summarize this 10-page transformer paper...",                         "summarization"),
-    ("Correlation between GDP growth and carbon emissions across G20",      "analysis"),
-    ("Write a short story about a robot discovering music",                 "creative"),
-    ("Translate this legal document from English to Mandarin",              "translation"),
-]
-for prompt, _ in categories:
-    r = tw.recommend_model(messages=[{"role": "user", "content": prompt}])
-    b = r["best_overall"]
-    print(f"  {r['prompt_type']:<16} {r['complexity']:<6} {b['model']:<26} ${b['estimated_cost_usd']:<11.5f} {b['success_probability']:.0%}")
-
-# ─── 2. Single-provider demos ────────────────────────────────────────────────
+print("  The SDK checks your budget BEFORE making the API call.")
+print("  If the estimated cost exceeds your remaining budget,")
+print("  a BudgetExceededError is raised and NO call is made.")
+print()
 
 if OPENAI_KEY:
-    header(2, "OPENAI")
-    client = tw.wrap(openai.OpenAI(api_key=OPENAI_KEY))
-    resp = client.chat.completions.create(
+    client = openai.OpenAI(api_key=OPENAI_KEY)
+    wrapped = tw.wrap(client, app_tag="limit-demo")
+
+    info("Attempting:  gpt-4o  ->  \"What is 2 + 2?\"")
+    print()
+
+    try:
+        response = wrapped.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "What is 2 + 2?"}],
+        )
+        ok("Call went through — no spend limit is set.")
+        info(f"Reply:   {response.choices[0].message.content}")
+        info(f"Tokens:  {response.usage.prompt_tokens} in / {response.usage.completion_tokens} out")
+    except BudgetExceededError as e:
+        warn("BudgetExceededError!")
+        print()
+        info(f"Provider:        {e.provider}")
+        info(f"Estimated cost:  ${e.estimated_cost:.5f}")
+        info(f"Remaining:       ${e.remaining:.5f}")
+        info(f"Period:          {e.period}")
+        print()
+        ok("The API call was BLOCKED. No money spent.")
+else:
+    warn("No OpenAI key — skipping spend limit demo.")
+
+pause("Disable or raise the spend limit in the dashboard, then press ENTER...")
+
+# Re-init to clear cached spend status
+tw = TokenGauge(token=TG_TOKEN)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 2: Verify limit is off — single calls per provider
+# ═══════════════════════════════════════════════════════════════════════════════
+
+step(2, "PROVIDER WRAPPERS")
+
+print("  Wrapping each provider client with one line.")
+print("  Every call is automatically logged to the dashboard.")
+print()
+
+if OPENAI_KEY:
+    client = openai.OpenAI(api_key=OPENAI_KEY)
+    wrapped = tw.wrap(client, app_tag="demo-openai")
+
+    resp = wrapped.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": "Explain quantum computing in one sentence."}],
     )
-    print(f"  Model:   gpt-4o-mini")
-    print(f"  Reply:   {resp.choices[0].message.content}")
-    print(f"  Tokens:  {resp.usage.prompt_tokens} in / {resp.usage.completion_tokens} out")
+    ok("OpenAI  gpt-4o-mini")
+    info(f"Reply:   {resp.choices[0].message.content}")
+    info(f"Tokens:  {resp.usage.prompt_tokens} in / {resp.usage.completion_tokens} out")
+    print()
 
 if ANTHROPIC_KEY:
-    header(3, "ANTHROPIC")
-    client = tw.wrap(anthropic.Anthropic(api_key=ANTHROPIC_KEY))
-    resp = client.messages.create(
+    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+    wrapped = tw.wrap(client, app_tag="demo-anthropic")
+
+    resp = wrapped.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=256,
         messages=[{"role": "user", "content": "Explain quantum computing in one sentence."}],
     )
-    print(f"  Model:   claude-haiku-4.5")
-    print(f"  Reply:   {resp.content[0].text}")
-    print(f"  Tokens:  {resp.usage.input_tokens} in / {resp.usage.output_tokens} out")
+    ok("Anthropic  claude-haiku-4.5")
+    info(f"Reply:   {resp.content[0].text}")
+    info(f"Tokens:  {resp.usage.input_tokens} in / {resp.usage.output_tokens} out")
+    print()
 
 if GOOGLE_KEY:
-    header(4, "GOOGLE GEMINI")
-    client = tw.wrap(genai.Client(api_key=GOOGLE_KEY))
-    resp = client.models.generate_content(
+    client = genai.Client(api_key=GOOGLE_KEY)
+    wrapped = tw.wrap(client, app_tag="demo-google")
+
+    resp = wrapped.models.generate_content(
         model="gemini-2.0-flash",
         contents="Explain quantum computing in one sentence.",
     )
-    print(f"  Model:   gemini-2.0-flash")
-    print(f"  Reply:   {resp.text}")
+    ok("Google  gemini-2.0-flash")
+    info(f"Reply:   {resp.text}")
+    print()
 
-# ─── 5. App Tags ─────────────────────────────────────────────────────────────
+pause()
 
-if OPENAI_KEY:
-    header(5, "APP TAGS")
-    for tag in ["summarizer", "chatbot", "batch-jobs"]:
-        client = tw.wrap(openai.OpenAI(api_key=OPENAI_KEY), app_tag=tag)
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": random.choice([p for p, _ in PROMPTS])}],
-            max_tokens=60,
-        )
-        reply = resp.choices[0].message.content[:80].replace("\n", " ")
-        print(f"  [{tag:<14}] {reply}...")
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 3: Model Recommender
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ─── 6. Bulk Generation ──────────────────────────────────────────────────────
+step(3, "MODEL RECOMMENDER")
 
-header(6, f"BULK GENERATION  ({BULK_CALLS} calls across providers)")
+print("  Classifies your prompt locally and scores every model")
+print("  by success probability. No API call is made.")
+print()
 
-# Build weighted model pool
+print("  ── Code ──")
+print_rec("rec01", tw.recommend_model(
+    messages=[{"role": "user", "content": "Refactor this Python class to use dataclasses..."}],
+    provider="anthropic",
+))
+print_rec("rec02", tw.recommend_model(
+    messages=[{"role": "user", "content": "Fix this bug in my JavaScript function:\n```js\nfunction add(a, b) { return a - b; }\n```"}],
+    provider="openai",
+))
+print_rec("rec03", tw.recommend_model(
+    messages=[{"role": "user", "content": "Implement a binary search tree in Rust with insert, delete, and search methods."}],
+    provider="google",
+))
+
+print("\n  ── Analysis ──")
+print_rec("rec04", tw.recommend_model(
+    messages=[{"role": "user", "content": "Compare the pros and cons of REST vs GraphQL for a mobile app backend."}],
+    provider="openai",
+))
+print_rec("rec05", tw.recommend_model(
+    messages=[{"role": "user", "content": "Analyze the impact of interest rate hikes on emerging market currencies."}],
+    provider="anthropic",
+))
+
+print("\n  ── Summarization ──")
+print_rec("rec06", tw.recommend_model(
+    messages=[{"role": "user", "content": "Summarize this 10-page research paper into 3 key takeaways: [paper text here...]"}],
+    provider="google",
+))
+print_rec("rec07", tw.recommend_model(
+    messages=[{"role": "user", "content": "TL;DR this meeting transcript."}],
+    provider="anthropic",
+))
+
+print("\n  ── Chat ──")
+print_rec("rec08", tw.recommend_model(
+    messages=[{"role": "user", "content": "Hey, what's a good book to read this weekend?"}],
+    provider="openai",
+))
+print_rec("rec09", tw.recommend_model(
+    messages=[
+        {"role": "user",      "content": "What's the capital of France?"},
+        {"role": "assistant", "content": "Paris."},
+        {"role": "user",      "content": "And Germany?"},
+    ],
+    provider="anthropic",
+))
+
+print("\n  ── Creative ──")
+print_rec("rec10", tw.recommend_model(
+    messages=[{"role": "user", "content": "Write a short story about a robot who learns to paint."}],
+    provider="anthropic",
+))
+print_rec("rec11", tw.recommend_model(
+    messages=[{"role": "user", "content": "Brainstorm 10 startup ideas in the climate tech space."}],
+    provider="openai",
+))
+
+print("\n  ── Extraction ──")
+print_rec("rec12", tw.recommend_model(
+    messages=[{"role": "user", "content": "Extract all names, dates, and dollar amounts from this contract and format as JSON."}],
+    provider="openai",
+))
+print_rec("rec13", tw.recommend_model(
+    messages=[{"role": "user", "content": "Parse this HTML and list all the href links."}],
+    provider="google",
+))
+
+print("\n  ── Translation ──")
+print_rec("rec14", tw.recommend_model(
+    messages=[{"role": "user", "content": "Translate this email into Spanish and French."}],
+    provider="google",
+))
+
+print("\n  ── Budget Constrained ($0.001) ──")
+print_rec("rec15", tw.recommend_model(
+    messages=[{"role": "user", "content": "Analyze this dataset and explain the trends."}],
+    provider="openai",
+    budget_usd=0.001,
+))
+
+print("\n  ── Best Overall (no provider filter) ──")
+print_rec("rec16", tw.recommend_model(
+    messages=[{"role": "user", "content": "Write a Python script that scrapes product prices from a website."}],
+))
+
+print("\n  ── High Complexity (multi-turn) ──")
+print_rec("rec17", tw.recommend_model(
+    messages=[
+        {"role": "user",      "content": "I'm building a distributed system. Here's my architecture:\n```\n[large diagram]\n```"},
+        {"role": "assistant", "content": "Here are some considerations..."},
+        {"role": "user",      "content": "What about fault tolerance? Also analyze the CAP theorem tradeoffs for my use case."},
+        {"role": "assistant", "content": "For fault tolerance..."},
+        {"role": "user",      "content": "Now compare this to a microservices approach and evaluate the pros and cons."},
+    ],
+    provider="anthropic",
+))
+
+pause()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 4: Bulk fill — flood the dashboard
+# ═══════════════════════════════════════════════════════════════════════════════
+
+step(4, f"BULK GENERATION  ({BULK_CALLS} calls)")
+
+print("  Sending real API calls across multiple providers, models,")
+print("  and app tags. Watch them appear on the dashboard live.")
+print()
+
 pool = []
 if OPENAI_KEY:
     for model, max_tok in OPENAI_MODELS:
@@ -205,10 +356,9 @@ if ANTHROPIC_KEY:
         pool.append(("anthropic", model, max_tok, anthropic.Anthropic(api_key=ANTHROPIC_KEY)))
 
 if not pool:
-    print("  No API keys available — skipping bulk generation.")
+    warn("No API keys available — skipping bulk generation.")
 else:
     total_tokens = 0
-    total_cost = 0.0
     providers_hit = set()
     models_hit = set()
     start = time.time()
@@ -216,7 +366,7 @@ else:
     for i in range(BULK_CALLS):
         provider, model, max_tok, base_client = random.choice(pool)
         tag = random.choice(TAGS)
-        prompt_text, _ = random.choice(PROMPTS)
+        prompt_text = random.choice(PROMPTS)
 
         wrapped = tw.wrap(base_client, app_tag=tag)
 
@@ -252,14 +402,17 @@ else:
             sys.stdout.flush()
 
     elapsed = time.time() - start
-    print(f"\n\n  Completed in {elapsed:.1f}s")
-    print(f"  Total tokens:  {total_tokens:,}")
-    print(f"  Providers:     {len(providers_hit)}  ({', '.join(sorted(providers_hit))})")
-    print(f"  Models:        {len(models_hit)}  ({', '.join(sorted(models_hit))})")
+    print()
+    print()
+    ok(f"Completed in {elapsed:.1f}s")
+    info(f"Total tokens:  {total_tokens:,}")
+    info(f"Providers:     {len(providers_hit)}  ({', '.join(sorted(providers_hit))})")
+    info(f"Models:        {len(models_hit)}  ({', '.join(sorted(models_hit))})")
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
 
-print(f"\n{'=' * W}")
-print(f"  DONE — view your dashboard:")
-print(f"  https://tokengauge.onrender.com")
-print(f"{'=' * W}\n")
+banner("Demo Complete!")
+
+print("  View your dashboard:")
+print("  https://tokengauge.onrender.com")
+print()
