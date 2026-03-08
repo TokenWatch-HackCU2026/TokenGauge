@@ -26,7 +26,7 @@ export default function App() {
     localStorage.setItem("access_token", res.access_token);
     localStorage.setItem("refresh_token", res.refresh_token);
     if (res.user) localStorage.setItem("user", JSON.stringify(res.user));
-    setUser(res.user ?? null);
+    setUser(res.user ?? undefined);
     setAuthed(true);
   }
 
@@ -34,7 +34,7 @@ export default function App() {
     await logout();
     localStorage.removeItem("user");
     queryClient.clear();
-    setUser(null);
+    setUser(undefined);
     setAuthed(false);
   }
 
