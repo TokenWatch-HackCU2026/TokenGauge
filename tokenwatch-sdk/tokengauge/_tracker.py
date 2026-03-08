@@ -128,6 +128,55 @@ def _calc_cost(model: str, tokens_in: int, tokens_out: int) -> float:
     return (tokens_in / 1_000_000) * price["input"] + (tokens_out / 1_000_000) * price["output"]
 
 
+# ── Model Registry (for recommendations) ─────────────────────────────────────
+# Each entry: provider, base quality (1-10), per-type score overrides,
+# and max_complexity (complexity levels above this incur a success penalty).
+
+_MODEL_REGISTRY: dict[str, dict] = {
+    # ── OpenAI ────────────────────────────────────────────────────────────────
+    "gpt-4.1":      {"provider": "openai",    "quality": 9, "max_complexity": 10,
+                     "type_scores": {"code": 10, "analysis": 9, "extraction": 9}},
+    "gpt-4.1-mini": {"provider": "openai",    "quality": 7, "max_complexity": 8,
+                     "type_scores": {"code": 8,  "chat": 8,   "extraction": 8}},
+    "gpt-4.1-nano": {"provider": "openai",    "quality": 5, "max_complexity": 6,
+                     "type_scores": {"chat": 7,  "summarization": 6}},
+    "gpt-4o":       {"provider": "openai",    "quality": 8, "max_complexity": 9,
+                     "type_scores": {"code": 9,  "analysis": 9,  "chat": 9,  "creative": 8}},
+    "gpt-4o-mini":  {"provider": "openai",    "quality": 6, "max_complexity": 7,
+                     "type_scores": {"chat": 8,  "summarization": 7, "translation": 7}},
+    "o3":           {"provider": "openai",    "quality": 9, "max_complexity": 10,
+                     "type_scores": {"code": 10, "analysis": 10, "extraction": 9}},
+    "o3-mini":      {"provider": "openai",    "quality": 7, "max_complexity": 9,
+                     "type_scores": {"code": 9,  "analysis": 8}},
+    "o4-mini":      {"provider": "openai",    "quality": 7, "max_complexity": 9,
+                     "type_scores": {"code": 9,  "analysis": 8}},
+
+    # ── Anthropic ─────────────────────────────────────────────────────────────
+    "claude-opus-4.6":           {"provider": "anthropic", "quality": 10, "max_complexity": 10,
+                                  "type_scores": {"code": 10, "analysis": 10, "creative": 10, "chat": 10}},
+    "claude-sonnet-4.6":         {"provider": "anthropic", "quality": 8,  "max_complexity": 9,
+                                  "type_scores": {"code": 9,  "analysis": 9,  "chat": 9, "creative": 8}},
+    "claude-haiku-4-5-20251001": {"provider": "anthropic", "quality": 6,  "max_complexity": 7,
+                                  "type_scores": {"chat": 8,  "summarization": 7, "translation": 7}},
+    "claude-3-7-sonnet":         {"provider": "anthropic", "quality": 8,  "max_complexity": 9,
+                                  "type_scores": {"code": 9,  "analysis": 9}},
+    "claude-3-5-sonnet":         {"provider": "anthropic", "quality": 8,  "max_complexity": 9,
+                                  "type_scores": {"code": 9,  "analysis": 8}},
+    "claude-3-5-haiku":          {"provider": "anthropic", "quality": 6,  "max_complexity": 7,
+                                  "type_scores": {"chat": 8,  "summarization": 7}},
+
+    # ── Google ────────────────────────────────────────────────────────────────
+    "gemini-2.5-pro":       {"provider": "google", "quality": 9, "max_complexity": 10,
+                             "type_scores": {"code": 9, "analysis": 9, "extraction": 9, "creative": 8}},
+    "gemini-2.5-flash":     {"provider": "google", "quality": 7, "max_complexity": 8,
+                             "type_scores": {"code": 8, "summarization": 8, "translation": 8, "extraction": 8}},
+    "gemini-2.0-flash":     {"provider": "google", "quality": 6, "max_complexity": 7,
+                             "type_scores": {"chat": 8, "summarization": 7, "translation": 8}},
+    "gemini-2.0-flash-lite":{"provider": "google", "quality": 5, "max_complexity": 6,
+                             "type_scores": {"chat": 7, "translation": 7}},
+}
+
+
 # ── Prompt Classification ─────────────────────────────────────────────────────
 # Runs locally in the SDK — raw prompt text is NEVER sent to TokenGauge.
 
@@ -723,3 +772,105 @@ class TokenGauge:
         except Exception as e:
             if self._verbose:
                 print(f"[TokenGauge] Error sending usage data: {e}", file=sys.stderr, flush=True)
+
+    # ── Model Recommendation ───────────────────────────────────────────────
+
+    def recommend_model(
+        self,
+        messages: Any,
+        provider: str | None = None,
+        budget_usd: float | None = None,
+    ) -> dict:
+        """
+        Recommend the best model for a given prompt — no API call required.
+
+        Classifies the prompt locally, estimates token usage and cost, then
+        scores every model in the registry by success probability (based on
+        prompt type + complexity). Returns the best match within your preferred
+        provider and the best match across all providers.
+
+        Parameters
+        ----------
+        messages:   Prompt in any supported format (str, list of dicts, etc.).
+        provider:   Preferred provider ("openai", "anthropic", "google").
+                    If given, ``within_provider`` in the result will be filled.
+        budget_usd: Maximum estimated cost per request (USD). Models whose
+                    estimated cost exceeds this are excluded.
+
+        Returns
+        -------
+        dict with keys:
+            prompt_type         – classified category (e.g. "code", "chat")
+            complexity          – estimated complexity score 1–10
+            estimated_tokens_in – rough token estimate for the prompt
+            within_provider     – best model for ``provider`` (None if not given)
+            best_overall        – best model across all providers
+
+        Each model entry contains:
+            model, provider, quality_score, estimated_tokens_in,
+            estimated_tokens_out, estimated_cost_usd, success_probability
+
+        Example
+        -------
+        ::
+
+            rec = tw.recommend_model(
+                messages=[{"role": "user", "content": "Refactor this Python class..."}],
+                provider="anthropic",
+            )
+            print(rec["best_overall"]["model"])      # e.g. "claude-opus-4.6"
+            print(rec["within_provider"]["model"])   # best Anthropic model
+        """
+        # 1. Classify + estimate complexity
+        prompt_type = _classify_prompt(messages)
+        text = _extract_text(messages)
+        # ~4 chars per token is a common English heuristic
+        est_tokens_in = max(10, len(text) // 4)
+        # Assume output ~40% of input (conservative heuristic)
+        est_tokens_out = max(10, est_tokens_in * 2 // 5)
+        complexity = _score_complexity(messages, prompt_type, est_tokens_in)
+
+        # 2. Score every registered model
+        scored: list[dict] = []
+        for model_id, info in _MODEL_REGISTRY.items():
+            est_cost = _calc_cost(model_id, est_tokens_in, est_tokens_out)
+
+            if budget_usd is not None and est_cost > budget_usd:
+                continue
+
+            # Use type-specific score if available, otherwise fall back to base quality
+            type_score = info["type_scores"].get(prompt_type, info["quality"])
+
+            # Penalise models that are under-powered for this complexity level
+            complexity_gap = max(0, complexity - info["max_complexity"])
+            penalty = complexity_gap * 0.12  # 12 % per level over the ceiling
+            success_prob = max(0.0, min(1.0, (type_score / 10.0) - penalty))
+
+            scored.append({
+                "model": model_id,
+                "provider": info["provider"],
+                "quality_score": type_score,
+                "estimated_tokens_in": est_tokens_in,
+                "estimated_tokens_out": est_tokens_out,
+                "estimated_cost_usd": round(est_cost, 8),
+                "success_probability": round(success_prob, 3),
+            })
+
+        # Sort: best success_probability first, cheapest on tie
+        scored.sort(key=lambda x: (-x["success_probability"], x["estimated_cost_usd"]))
+
+        # 3. Pick best within provider (if requested)
+        within_provider: dict | None = None
+        if provider:
+            prov_lower = provider.lower()
+            within_provider = next(
+                (m for m in scored if m["provider"] == prov_lower), None
+            )
+
+        return {
+            "prompt_type": prompt_type,
+            "complexity": complexity,
+            "estimated_tokens_in": est_tokens_in,
+            "within_provider": within_provider,
+            "best_overall": scored[0] if scored else None,
+        }
