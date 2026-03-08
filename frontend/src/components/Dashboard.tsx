@@ -45,6 +45,17 @@ function rangeToGranularity(range: Range): "hour" | "day" | "week" | "month" {
   }
 }
 
+// ─── Responsive hook ─────────────────────────────────────────────────────────
+function useIsMobile(breakpoint = 768) {
+  const [mobile, setMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < breakpoint);
+  useEffect(() => {
+    const check = () => setMobile(window.innerWidth < breakpoint);
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, [breakpoint]);
+  return mobile;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Page = "overview" | "usage" | "settings";
 
@@ -56,8 +67,10 @@ const NAV_ITEMS: { id: Page; icon: string; label: string }[] = [
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 export default function Dashboard({ onLogout, user }: { onLogout?: () => void; user?: UserOut | null }) {
+  const mobile = useIsMobile();
   const [page, setPage] = useState<Page>("overview");
   const [range, setRange] = useState<Range>("1W");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const params = rangeToParams(range);
   const gran = rangeToGranularity(range);
 
@@ -106,70 +119,106 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
     return acc;
   }, []);
 
+  const sidebar = (
+    <aside style={{
+      width: mobile ? "75vw" : 220,
+      maxWidth: 280,
+      background: C.surface,
+      borderRight: `1px solid ${C.border}`,
+      display: "flex",
+      flexDirection: "column",
+      flexShrink: 0,
+      ...(mobile ? { position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 100 } : {}),
+    }}>
+      <div style={{ padding: "1.5rem 1.25rem 1.25rem", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+          <GaugeLogo size={32} />
+          <span style={{ fontWeight: 700, fontSize: "1.05rem", letterSpacing: "-0.02em" }}>TokenGauge</span>
+        </div>
+        {mobile && (
+          <button onClick={() => setSidebarOpen(false)} style={{ background: "none", border: "none", color: C.muted, fontSize: "1.25rem", cursor: "pointer", padding: 4 }}>✕</button>
+        )}
+      </div>
+
+      <nav style={{ flex: 1, padding: "0.75rem 0.5rem" }}>
+        {NAV_ITEMS.map(({ id, icon, label }) => (
+          <button
+            key={id}
+            onClick={() => { setPage(id); if (mobile) setSidebarOpen(false); }}
+            style={{
+              width: "100%", display: "flex", alignItems: "center", gap: "0.75rem",
+              padding: "0.6rem 0.75rem", border: "none", borderRadius: 8, cursor: "pointer",
+              background: page === id ? C.accentDim : "transparent",
+              color: page === id ? C.accentLight : C.subtle,
+              fontSize: "0.9rem", fontWeight: page === id ? 600 : 400,
+              marginBottom: 2, transition: "all 0.15s",
+            }}
+          >
+            <span style={{ fontSize: "0.8rem" }}>{icon}</span>
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      <div style={{ padding: "1rem 1.25rem", borderTop: `1px solid ${C.border}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: onLogout ? "0.6rem" : 0 }}>
+          <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.85rem", fontWeight: 700, flexShrink: 0 }}>
+            {(user?.full_name ?? user?.email ?? "?")[0].toUpperCase()}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: "0.85rem", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {user?.full_name ?? user?.email ?? "User"}
+            </div>
+            <div style={{ fontSize: "0.75rem", color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {user?.email ?? ""}
+            </div>
+          </div>
+        </div>
+        {onLogout && (
+          <button
+            onClick={onLogout}
+            style={{ width: "100%", background: "transparent", border: `1px solid ${C.border}`, color: C.muted, borderRadius: 8, padding: "0.4rem", fontSize: "0.8rem", cursor: "pointer" }}
+          >
+            Sign out
+          </button>
+        )}
+      </div>
+    </aside>
+  );
+
   return (
     <div style={{ display: "flex", height: "100vh", background: C.bg, color: C.text, fontFamily: "'Inter', system-ui, sans-serif", overflow: "hidden" }}>
       {/* ── Sidebar ── */}
-      <aside style={{ width: 220, background: C.surface, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", flexShrink: 0 }}>
-        <div style={{ padding: "1.5rem 1.25rem 1.25rem", borderBottom: `1px solid ${C.border}` }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-            <GaugeLogo size={32} />
-            <span style={{ fontWeight: 700, fontSize: "1.05rem", letterSpacing: "-0.02em" }}>TokenGauge</span>
-          </div>
-        </div>
-
-        <nav style={{ flex: 1, padding: "0.75rem 0.5rem" }}>
-          {NAV_ITEMS.map(({ id, icon, label }) => (
-            <button
-              key={id}
-              onClick={() => setPage(id)}
-              style={{
-                width: "100%", display: "flex", alignItems: "center", gap: "0.75rem",
-                padding: "0.6rem 0.75rem", border: "none", borderRadius: 8, cursor: "pointer",
-                background: page === id ? C.accentDim : "transparent",
-                color: page === id ? C.accentLight : C.subtle,
-                fontSize: "0.9rem", fontWeight: page === id ? 600 : 400,
-                marginBottom: 2, transition: "all 0.15s",
-              }}
-            >
-              <span style={{ fontSize: "0.8rem" }}>{icon}</span>
-              {label}
-            </button>
-          ))}
-        </nav>
-
-        <div style={{ padding: "1rem 1.25rem", borderTop: `1px solid ${C.border}` }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: onLogout ? "0.6rem" : 0 }}>
-            <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.85rem", fontWeight: 700, flexShrink: 0 }}>
-              {(user?.full_name ?? user?.email ?? "?")[0].toUpperCase()}
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: "0.85rem", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {user?.full_name ?? user?.email ?? "User"}
-              </div>
-              <div style={{ fontSize: "0.75rem", color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {user?.email ?? ""}
-              </div>
-            </div>
-          </div>
-          {onLogout && (
-            <button
-              onClick={onLogout}
-              style={{ width: "100%", background: "transparent", border: `1px solid ${C.border}`, color: C.muted, borderRadius: 8, padding: "0.4rem", fontSize: "0.8rem", cursor: "pointer" }}
-            >
-              Sign out
-            </button>
-          )}
-        </div>
-      </aside>
+      {mobile ? (
+        sidebarOpen && (
+          <>
+            <div onClick={() => setSidebarOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 99 }} />
+            {sidebar}
+          </>
+        )
+      ) : sidebar}
 
       {/* ── Main ── */}
-      <main style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
-        <header style={{ padding: "1.25rem 2rem", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: C.surface, flexShrink: 0 }}>
-          <h1 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 600 }}>
-            {NAV_ITEMS.find(n => n.id === page)?.label}
-          </h1>
+      <main style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <header style={{
+          padding: mobile ? "0.75rem 1rem" : "1.25rem 2rem",
+          borderBottom: `1px solid ${C.border}`,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          background: C.surface, flexShrink: 0, gap: "0.5rem",
+        }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 2, background: C.bg, borderRadius: 8, padding: 3 }}>
+            {mobile && (
+              <button onClick={() => setSidebarOpen(true)} style={{ background: "none", border: "none", color: C.text, fontSize: "1.25rem", cursor: "pointer", padding: 0 }}>☰</button>
+            )}
+            <h1 style={{ margin: 0, fontSize: mobile ? "1rem" : "1.15rem", fontWeight: 600, whiteSpace: "nowrap" }}>
+              {NAV_ITEMS.find(n => n.id === page)?.label}
+            </h1>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 1, minWidth: 0 }}>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 2, background: C.bg, borderRadius: 8, padding: 3,
+              overflowX: "auto", flexShrink: 1, minWidth: 0,
+            }}>
               {RANGES.map(r => (
                 <button
                   key={r}
@@ -179,26 +228,28 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
                     color: range === r ? "#fff" : C.muted,
                     border: "none",
                     borderRadius: 6,
-                    padding: "0.35rem 0.7rem",
-                    fontSize: "0.78rem",
+                    padding: mobile ? "0.3rem 0.5rem" : "0.35rem 0.7rem",
+                    fontSize: mobile ? "0.7rem" : "0.78rem",
                     fontWeight: 600,
                     cursor: "pointer",
                     transition: "all 0.12s",
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
                   }}
                 >
                   {r === "live" ? "Live" : r}
                 </button>
               ))}
             </div>
-            <Pill color={isLive ? C.green : C.muted}>{isLive ? "● Live" : "○ Connecting…"}</Pill>
+            {!mobile && <Pill color={isLive ? C.green : C.muted}>{isLive ? "● Live" : "○ Connecting…"}</Pill>}
           </div>
         </header>
 
-        <div style={{ flex: 1, padding: "1.75rem 2rem", overflow: "auto" }}>
+        <div style={{ flex: 1, padding: mobile ? "1rem" : "1.75rem 2rem", overflow: "auto" }}>
           {page === "overview" && (
-            <OverviewPage summary={summary} records={allRecords} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} gran={gran} range={range} />
+            <OverviewPage summary={summary} records={allRecords} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} gran={gran} range={range} mobile={mobile} />
           )}
-          {page === "usage" && <UsagePage summary={summary} records={allRecords} loading={isLoading} />}
+          {page === "usage" && <UsagePage summary={summary} records={allRecords} loading={isLoading} mobile={mobile} />}
           {page === "settings" && <SettingsPage quota={quota} user={user} />}
         </div>
       </main>
@@ -215,19 +266,24 @@ const pad2 = (n: number) => String(n).padStart(2, "0");
 function bucketInfoFromDate(d: Date, gran: Granularity): { sort: string; label: string } {
   const Y = d.getFullYear(), M = d.getMonth(), D = d.getDate(), H = d.getHours();
   switch (gran) {
-    case "hour":
-      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}T${pad2(H)}`, label: `${M+1}/${D} ${pad2(H)}:00` };
-    case "day":
-      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}`, label: `${M+1}/${D}` };
+    case "hour": {
+      const ampm = H >= 12 ? "PM" : "AM";
+      const h12 = H % 12 || 12;
+      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}T${pad2(H)}`, label: `${h12} ${ampm}` };
+    }
+    case "day": {
+      const dayName = d.toLocaleString("default", { weekday: "short" });
+      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}`, label: `${dayName} ${M+1}/${D}` };
+    }
     case "week": {
       const dow = d.getDay();
       const mon = new Date(d);
       mon.setDate(D - dow + (dow === 0 ? -6 : 1));
       const wY = mon.getFullYear(), wM = mon.getMonth(), wD = mon.getDate();
-      return { sort: `${wY}-${pad2(wM+1)}-${pad2(wD)}`, label: `Wk ${wM+1}/${wD}` };
+      return { sort: `${wY}-${pad2(wM+1)}-${pad2(wD)}`, label: `${mon.toLocaleString("default", { month: "short" })} ${wD}` };
     }
     case "month":
-      return { sort: `${Y}-${pad2(M+1)}`, label: d.toLocaleString("default", { month: "short", year: "numeric" }) };
+      return { sort: `${Y}-${pad2(M+1)}`, label: d.toLocaleString("default", { month: "short", year: "2-digit" }) };
   }
 }
 
@@ -289,6 +345,7 @@ type UsageMetric = "cost" | "requests" | "tokens";
 function ModelUsageChart({ records, gran, range }: { records: ApiCall[]; gran: Granularity; range: Range }) {
   const [metric, setMetric] = useState<UsageMetric>("cost");
   const [selected, setSelected] = useState<string | null>(null);
+  const [hover, setHover] = useState<{ date: string; values: Record<string, number>; total: number } | null>(null);
 
   // 1. Build full timeline with every bucket
   const timeline = generateTimeline(range, gran);
@@ -314,7 +371,14 @@ function ModelUsageChart({ records, gran, range }: { records: ApiCall[]; gran: G
     return row;
   });
 
-  const subtitles: Record<UsageMetric, string> = { cost: "USD per period", requests: "Requests per period", tokens: "Tokens per period" };
+  // Total across all time for the default display
+  const totalValue = data.reduce((sum, row) => {
+    for (const m of modelList) sum += (row[m] as number) ?? 0;
+    return sum;
+  }, 0);
+
+  const fmtValue = (v: number) => metric === "cost" ? fmtCost(v) : fmtNum(v);
+  const metricLabels: Record<UsageMetric, string> = { cost: "Total Spend", requests: "Total Requests", tokens: "Total Tokens" };
 
   const toggleBtn = (label: string, val: UsageMetric) => (
     <button
@@ -326,23 +390,61 @@ function ModelUsageChart({ records, gran, range }: { records: ApiCall[]; gran: G
     </button>
   );
 
-  const fmtValue = (v: number) => metric === "cost" ? fmtCost(v) : fmtNum(v);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleMouseMove = (state: any) => {
+    if (state?.activePayload?.length) {
+      const payload = state.activePayload;
+      const date = state.activeLabel as string;
+      const values: Record<string, number> = {};
+      let total = 0;
+      for (const p of payload) {
+        values[p.dataKey as string] = p.value as number;
+        total += p.value as number;
+      }
+      setHover({ date, values, total });
+    }
+  };
+
+  const handleMouseLeave = () => setHover(null);
 
   return (
-    <Card
-      title="Model usage over time"
-      subtitle={subtitles[metric]}
-      action={<div style={{ display: "flex", gap: 4 }}>{toggleBtn("Cost","cost")}{toggleBtn("Requests","requests")}{toggleBtn("Tokens","tokens")}</div>}
-    >
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1.25rem 1.5rem" }}>
+      {/* Header: big value + date on hover */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.75rem" }}>
+        <div>
+          <div style={{ fontSize: "1.75rem", fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.2 }}>
+            {fmtValue(hover ? hover.total : totalValue)}
+          </div>
+          <div style={{ color: C.muted, fontSize: "0.8rem", marginTop: 2 }}>
+            {hover ? hover.date : metricLabels[metric]}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {toggleBtn("Cost","cost")}{toggleBtn("Requests","requests")}{toggleBtn("Tokens","tokens")}
+        </div>
+      </div>
+
+      {/* Per-model breakdown on hover */}
+      {hover && modelList.length > 1 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem 1.25rem", marginBottom: "0.5rem" }}>
+          {modelList.filter(m => (hover.values[m] ?? 0) > 0).map((model, i) => (
+            <span key={model} style={{ fontSize: "0.78rem", color: C.subtle }}>
+              <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: LINE_COLORS[modelList.indexOf(model) % LINE_COLORS.length], marginRight: 5, verticalAlign: "middle" }} />
+              {model}: {fmtValue(hover.values[model] ?? 0)}
+            </span>
+          ))}
+        </div>
+      )}
+
       {data.length === 0 ? <EmptyState label="No data for this period" /> : (
         <>
-          <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={data}>
-              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtValue} width={70} />
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={data} onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}>
+              <XAxis dataKey="date" hide />
+              <YAxis hide />
               <Tooltip
-                contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
-                formatter={(v: number, name: string) => [fmtValue(v), name]}
+                content={() => null}
+                cursor={{ stroke: C.muted, strokeWidth: 1, strokeDasharray: "4 4" }}
               />
               {modelList.map((model, i) => (
                 <Line
@@ -353,11 +455,14 @@ function ModelUsageChart({ records, gran, range }: { records: ApiCall[]; gran: G
                   strokeWidth={selected === null || selected === model ? 2.5 : 1}
                   strokeOpacity={selected === null || selected === model ? 1 : 0.15}
                   dot={false}
+                  activeDot={selected === null || selected === model ? { r: 4, fill: LINE_COLORS[i % LINE_COLORS.length], stroke: C.surface, strokeWidth: 2 } : false}
                   name={model}
                 />
               ))}
             </LineChart>
           </ResponsiveContainer>
+
+          {/* Model legend */}
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem 0.75rem", marginTop: "0.5rem" }}>
             {modelList.map((model, i) => (
               <button key={model} onClick={() => setSelected(selected === model ? null : model)} style={{ background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, padding: "2px 4px", borderRadius: 4, opacity: selected === null || selected === model ? 1 : 0.35 }}>
@@ -368,12 +473,12 @@ function ModelUsageChart({ records, gran, range }: { records: ApiCall[]; gran: G
           </div>
         </>
       )}
-    </Card>
+    </div>
   );
 }
 
 // ─── Cost breakdown pie ────────────────────────────────────────────────────────
-function CostPieChart({ breakdown }: { breakdown: BreakdownRow[] }) {
+function CostPieChart({ breakdown, mobile }: { breakdown: BreakdownRow[]; mobile?: boolean }) {
   const pieData = Object.entries(
     breakdown.reduce<Record<string, number>>((acc, r) => { acc[r.model] = (acc[r.model] ?? 0) + r.cost_usd; return acc; }, {})
   ).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
@@ -381,9 +486,9 @@ function CostPieChart({ breakdown }: { breakdown: BreakdownRow[] }) {
   return (
     <Card title="Cost by model" subtitle="% share">
       {pieData.length > 0 ? (
-        <ResponsiveContainer width="100%" height={260}>
+        <ResponsiveContainer width="100%" height={mobile ? 220 : 260}>
           <PieChart>
-            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3}>
+            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={mobile ? 40 : 55} outerRadius={mobile ? 65 : 85} paddingAngle={3}>
               {pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
             </Pie>
             <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} formatter={(v: number) => [fmtCost(v), "Cost"]} />
@@ -398,7 +503,7 @@ function CostPieChart({ breakdown }: { breakdown: BreakdownRow[] }) {
 }
 
 // ─── Overview ─────────────────────────────────────────────────────────────────
-function OverviewPage({ summary, records, breakdown, dashSummary, loading, gran, range }: {
+function OverviewPage({ summary, records, breakdown, dashSummary, loading, gran, range, mobile }: {
   summary: ApiCallSummary[];
   records: ApiCall[];
   breakdown: BreakdownRow[];
@@ -406,19 +511,20 @@ function OverviewPage({ summary, records, breakdown, dashSummary, loading, gran,
   loading: boolean;
   gran: Granularity;
   range: Range;
+  mobile: boolean;
 }) {
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "1rem", marginBottom: "1.5rem" }}>
+      <div style={{ display: "grid", gridTemplateColumns: mobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: "0.75rem", marginBottom: "1.25rem" }}>
         <KpiCard label="Total Spend" value={loading ? "—" : fmtCost(dashSummary?.total_cost_usd ?? 0)} />
         <KpiCard label="Total Tokens" value={loading ? "—" : fmtNum((dashSummary?.total_tokens_in ?? 0) + (dashSummary?.total_tokens_out ?? 0))} />
         <KpiCard label="API Calls" value={loading ? "—" : fmtNum(dashSummary?.request_count ?? 0)} />
         <KpiCard label="Avg Latency" value={loading ? "—" : `${(dashSummary?.avg_latency_ms ?? 0).toFixed(0)}ms`} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem", marginBottom: "1.5rem" }}>
+      <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "2fr 1fr", gap: "1rem", marginBottom: "1.25rem" }}>
         <ModelUsageChart records={records} gran={gran} range={range} />
-        <CostPieChart breakdown={breakdown} />
+        <CostPieChart breakdown={breakdown} mobile={mobile} />
       </div>
 
       <Card title="Recent requests" subtitle={`${records.length} total`}>
@@ -429,14 +535,14 @@ function OverviewPage({ summary, records, breakdown, dashSummary, loading, gran,
 }
 
 // ─── Usage ────────────────────────────────────────────────────────────────────
-function UsagePage({ summary, records, loading }: { summary: ApiCallSummary[]; records: ApiCall[]; loading: boolean }) {
+function UsagePage({ summary, records, loading, mobile }: { summary: ApiCallSummary[]; records: ApiCall[]; loading: boolean; mobile: boolean }) {
   const [filterProvider, setFilterProvider] = useState("all");
   const providers = ["all", ...Array.from(new Set(records.map(r => r.provider)))];
   const filtered = filterProvider === "all" ? records : records.filter(r => r.provider === filterProvider);
 
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem", marginBottom: "1.5rem" }}>
+      <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "repeat(3, 1fr)", gap: "1rem", marginBottom: "1.5rem" }}>
         {summary.map(s => (
           <Card key={`${s.provider}-${s.model}`} title={s.model} subtitle={s.provider}>
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: "0.5rem" }}>
@@ -686,9 +792,9 @@ function RequestsTable({ records }: { records: ApiCall[] }) {
 
 function KpiCard({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1.25rem 1.5rem" }}>
-      <div style={{ color: C.muted, fontSize: "0.8rem", marginBottom: "0.5rem" }}>{label}</div>
-      <div style={{ fontSize: "1.75rem", fontWeight: 700, letterSpacing: "-0.03em" }}>{value}</div>
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1rem 1.25rem" }}>
+      <div style={{ color: C.muted, fontSize: "0.75rem", marginBottom: "0.35rem" }}>{label}</div>
+      <div style={{ fontSize: "clamp(1.1rem, 4vw, 1.75rem)", fontWeight: 700, letterSpacing: "-0.03em" }}>{value}</div>
     </div>
   );
 }
