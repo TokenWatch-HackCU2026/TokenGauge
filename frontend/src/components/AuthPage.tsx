@@ -1,17 +1,6 @@
 import { useState } from "react";
 import { login, register, AuthResponse } from "../api/client";
-
-const C = {
-  bg: "#0a0e1a",
-  surface: "#111827",
-  border: "#1e2d40",
-  accent: "#6366f1",
-  accentLight: "#818cf8",
-  red: "#ef4444",
-  text: "#f1f5f9",
-  muted: "#64748b",
-  subtle: "#94a3b8",
-} as const;
+import { C, GaugeLogo } from "../theme";
 
 interface Props {
   onAuth: (tokens: AuthResponse) => void;
@@ -62,20 +51,8 @@ export default function AuthPage({ onAuth }: Props) {
       <div style={{ width: "100%", maxWidth: 400, padding: "0 1rem" }}>
         {/* Logo */}
         <div style={{ textAlign: "center", marginBottom: "2rem" }}>
-          <div
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 12,
-              background: C.accent,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "1.5rem",
-              margin: "0 auto 0.75rem",
-            }}
-          >
-            ⬡
+          <div style={{ margin: "0 auto 0.75rem", width: 48, height: 48 }}>
+            <GaugeLogo size={48} />
           </div>
           <div style={{ fontWeight: 700, fontSize: "1.4rem", letterSpacing: "-0.03em" }}>
             TokenGauge
@@ -171,8 +148,8 @@ export default function AuthPage({ onAuth }: Props) {
             {slow && (
               <div
                 style={{
-                  background: `#6366f118`,
-                  border: `1px solid #6366f144`,
+                  background: `${C.accent}18`,
+                  border: `1px solid ${C.accent}44`,
                   borderRadius: 8,
                   padding: "0.6rem 0.85rem",
                   fontSize: "0.82rem",

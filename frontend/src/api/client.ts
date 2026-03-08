@@ -61,6 +61,30 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json();
 }
 
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const url = BASE + path;
+  let res = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 401) {
+    const ok = await refreshAccessToken();
+    if (ok) {
+      res = await fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify(body),
+      });
+    }
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? res.statusText);
+  }
+  return res.json();
+}
+
 // ── Auth types & endpoints ────────────────────────────────────────────────────
 
 export interface UserOut {
@@ -68,6 +92,7 @@ export interface UserOut {
   email: string;
   full_name: string | null;
   avatar_url: string | null;
+  phone: string | null;
   created_at: string;
 }
 
@@ -92,6 +117,10 @@ export async function logout(): Promise<void> {
   }
   localStorage.removeItem("access_token");
   localStorage.removeItem("refresh_token");
+}
+
+export function updatePhone(phone: string): Promise<{ phone: string }> {
+  return put("/api/v1/auth/phone", { phone });
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────

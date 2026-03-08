@@ -1,41 +1,16 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
+  BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend,
-  ScatterChart, Scatter, ZAxis,
 } from "recharts";
 import {
   fetchRecords, fetchSummary, fetchDashboardSummary,
-  fetchTimeseries, fetchBreakdown, fetchQuota,
-  fetchSdkToken, regenerateSdkToken, recalculateCosts,
-  ApiCall, ApiCallSummary, TimeseriesPoint, BreakdownRow, UserOut,
+  fetchBreakdown, fetchQuota,
+  fetchSdkToken, regenerateSdkToken, recalculateCosts, updatePhone,
+  ApiCall, ApiCallSummary, BreakdownRow, UserOut,
 } from "../api/client";
-
-// ─── Theme ────────────────────────────────────────────────────────────────────
-const C = {
-  bg: "#0a0e1a",
-  surface: "#111827",
-  border: "#1e2d40",
-  accent: "#6366f1",
-  accentLight: "#818cf8",
-  accentDim: "rgba(99,102,241,0.15)",
-  green: "#10b981",
-  red: "#ef4444",
-  yellow: "#f59e0b",
-  text: "#f1f5f9",
-  muted: "#64748b",
-  subtle: "#94a3b8",
-} as const;
-
-const PROVIDER_COLORS: Record<string, string> = {
-  openai: "#10a37f",
-  anthropic: "#d97706",
-  google: "#4285f4",
-  mistral: "#7c3aed",
-};
-
-const PIE_COLORS = ["#6366f1", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"];
+import { C, PROVIDER_COLORS, PIE_COLORS, LINE_COLORS, GaugeLogo } from "../theme";
 
 // ─── Date range helpers ───────────────────────────────────────────────────────
 function rangeToParams(range: string) {
@@ -63,10 +38,6 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
     queryKey: ["dashboard-summary", range],
     queryFn: () => fetchDashboardSummary(params),
   });
-  const { data: timeseries = [] } = useQuery({
-    queryKey: ["timeseries", range],
-    queryFn: () => fetchTimeseries({ ...params, groupBy: range === "24h" ? "hour" : "day" }),
-  });
   const { data: breakdown = [] } = useQuery({
     queryKey: ["breakdown", range],
     queryFn: () => fetchBreakdown(params),
@@ -90,7 +61,7 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
       <aside style={{ width: 220, background: C.surface, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <div style={{ padding: "1.5rem 1.25rem 1.25rem", borderBottom: `1px solid ${C.border}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem" }}>⬡</div>
+            <GaugeLogo size={32} />
             <span style={{ fontWeight: 700, fontSize: "1.05rem", letterSpacing: "-0.02em" }}>TokenGauge</span>
           </div>
         </div>
@@ -162,10 +133,10 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
 
         <div style={{ flex: 1, padding: "1.75rem 2rem", overflow: "auto" }}>
           {page === "overview" && (
-            <OverviewPage summary={summary} records={records} timeseries={timeseries} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} range={range} />
+            <OverviewPage summary={summary} records={records} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} range={range} />
           )}
           {page === "usage" && <UsagePage summary={summary} records={records} loading={isLoading} />}
-          {page === "settings" && <SettingsPage quota={quota} />}
+          {page === "settings" && <SettingsPage quota={quota} user={user} />}
         </div>
       </main>
     </div>
@@ -173,7 +144,6 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
 }
 
 // ─── Chart helpers ─────────────────────────────────────────────────────────────
-const LINE_COLORS = ["#6366f1","#10b981","#f59e0b","#ef4444","#06b6d4","#8b5cf6","#ec4899","#84cc16"];
 
 function bucketKey(ts: string, range: string): string {
   const d = new Date(ts);
@@ -183,151 +153,75 @@ function bucketKey(ts: string, range: string): string {
   return `${d.getMonth()+1}/${d.getDate()}`;
 }
 
-function buildSeries(records: ApiCall[], dim: "provider" | "model" | "key", range: string) {
+// ─── Model Usage Histogram (stacked bar) ─────────────────────────────────────
+type UsageMetric = "cost" | "requests" | "tokens";
+
+function ModelUsageChart({ records, range }: { records: ApiCall[]; range: string }) {
+  const [metric, setMetric] = useState<UsageMetric>("cost");
+  const [selected, setSelected] = useState<string | null>(null);
+
+  // Bucket records by date × model
   const buckets: Record<string, Record<string, number>> = {};
-  const keys = new Set<string>();
+  const models = new Set<string>();
   for (const r of records) {
     const bk = bucketKey(r.timestamp, range);
-    const dk = dim === "key" ? (r.key_hint ? `…${r.key_hint}` : "unknown") : r[dim];
-    keys.add(dk);
+    models.add(r.model);
     if (!buckets[bk]) buckets[bk] = {};
-    buckets[bk][dk] = (buckets[bk][dk] ?? 0) + r.cost_usd;
+    const val = metric === "cost" ? r.cost_usd : metric === "requests" ? 1 : r.tokens_in + r.tokens_out;
+    buckets[bk][r.model] = (buckets[bk][r.model] ?? 0) + val;
   }
   const sortedBuckets = Object.keys(buckets).sort();
   const data = sortedBuckets.map(bk => ({ date: bk, ...buckets[bk] }));
-  return { data, keys: Array.from(keys) };
-}
+  const modelList = Array.from(models);
 
-// ─── Spend Over Time chart ─────────────────────────────────────────────────────
-type SpendMode = "total" | "provider" | "model" | "key";
+  const subtitles: Record<UsageMetric, string> = { cost: "USD per period", requests: "Requests per period", tokens: "Tokens per period" };
 
-function SpendChart({ records, timeseries, range }: { records: ApiCall[]; timeseries: TimeseriesPoint[]; range: string }) {
-  const [mode, setMode] = useState<SpendMode>("total");
-  const [selected, setSelected] = useState<string | null>(null);
-  const [showDots, setShowDots] = useState(false);
-
-  const toggleBtn = (label: string, val: SpendMode) => (
+  const toggleBtn = (label: string, val: UsageMetric) => (
     <button
       key={val}
-      onClick={() => { setMode(val); setSelected(null); }}
-      style={{ background: mode === val ? C.accent : C.border, color: mode === val ? "#fff" : C.muted, border: "none", borderRadius: 6, padding: "0.25rem 0.65rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}
+      onClick={() => setMetric(val)}
+      style={{ background: metric === val ? C.accent : C.border, color: metric === val ? "#fff" : C.muted, border: "none", borderRadius: 6, padding: "0.25rem 0.65rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}
     >
       {label}
     </button>
   );
 
-  const controls = (
-    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
-      {toggleBtn("Total","total")}
-      {toggleBtn("Provider","provider")}
-      {toggleBtn("Model","model")}
-      {toggleBtn("Key","key")}
-      <button
-        onClick={() => setShowDots(v => !v)}
-        style={{ background: showDots ? C.green : C.border, color: showDots ? "#fff" : C.muted, border: "none", borderRadius: 6, padding: "0.25rem 0.65rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}
-      >
-        Requests
-      </button>
-    </div>
-  );
-
-  // Scatter data: each record as an {x: epoch ms, y: cost, label: model/provider}
-  const scatterByDim: Record<string, { x: number; y: number; label: string }[]> = {};
-  if (showDots) {
-    for (const r of records) {
-      const dk = mode === "total" ? "all" : mode === "key" ? (r.key_hint ? `…${r.key_hint}` : "unknown") : r[mode];
-      if (!scatterByDim[dk]) scatterByDim[dk] = [];
-      scatterByDim[dk].push({ x: new Date(r.timestamp).getTime(), y: r.cost_usd, label: r.model });
-    }
-  }
-  const scatterKeys = Object.keys(scatterByDim);
-
-  const fmtXTick = (ms: number) => {
-    const d = new Date(ms);
-    return range === "24h" ? `${String(d.getHours()).padStart(2,"0")}:00` : `${d.getMonth()+1}/${d.getDate()}`;
-  };
-
-  if (mode === "total" && !showDots) {
-    return (
-      <Card title="Spend over time" subtitle="USD per period" action={controls}>
-        <ResponsiveContainer width="100%" height={220}>
-          <LineChart data={timeseries}>
-            <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} width={70} />
-            <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} formatter={(v: number) => [fmtCost(v), "Cost"]} />
-            <Line type="monotone" dataKey="cost_usd" stroke={C.accent} strokeWidth={2.5} dot={false} name="Total" />
-          </LineChart>
-        </ResponsiveContainer>
-      </Card>
-    );
-  }
-
-  if (showDots) {
-    const xMin = records.length ? Math.min(...records.map(r => new Date(r.timestamp).getTime())) : 0;
-    const xMax = records.length ? Math.max(...records.map(r => new Date(r.timestamp).getTime())) : 0;
-    return (
-      <Card title="Spend over time" subtitle="Each dot = one request" action={controls}>
-        {records.length === 0 ? <EmptyState label="No data for this period" /> : (
-          <>
-            <ResponsiveContainer width="100%" height={220}>
-              <ScatterChart>
-                <XAxis type="number" dataKey="x" domain={[xMin, xMax]} tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtXTick} />
-                <YAxis type="number" dataKey="y" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} width={70} />
-                <ZAxis range={[40, 40]} />
-                <Tooltip
-                  contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
-                  cursor={{ strokeDasharray: "3 3" }}
-                  formatter={(v: number, name: string) => name === "y" ? [fmtCost(v), "Cost"] : [new Date(v as number).toLocaleString(), "Time"]}
-                />
-                {scatterKeys.map((k, i) => (
-                  <Scatter
-                    key={k}
-                    name={k}
-                    data={scatterByDim[k]}
-                    fill={LINE_COLORS[i % LINE_COLORS.length]}
-                    fillOpacity={selected === null || selected === k ? 0.85 : 0.15}
-                  />
-                ))}
-              </ScatterChart>
-            </ResponsiveContainer>
-            {scatterKeys.length > 1 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem 0.75rem", marginTop: "0.5rem" }}>
-                {scatterKeys.map((k, i) => (
-                  <button key={k} onClick={() => setSelected(selected === k ? null : k)} style={{ background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, padding: "2px 4px", borderRadius: 4, opacity: selected === null || selected === k ? 1 : 0.35 }}>
-                    <span style={{ width: 10, height: 10, borderRadius: "50%", background: LINE_COLORS[i % LINE_COLORS.length], display: "inline-block", flexShrink: 0 }} />
-                    <span style={{ fontSize: "0.78rem", color: C.subtle }}>{k}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </Card>
-    );
-  }
-
-  const dim = (mode === "key" ? "key" : mode === "total" ? "provider" : mode) as "provider" | "model" | "key";
-  const { data, keys } = buildSeries(records, dim, range);
+  const fmtValue = (v: number) => metric === "cost" ? fmtCost(v) : fmtNum(v);
 
   return (
-    <Card title="Spend over time" subtitle="USD per period" action={controls}>
+    <Card
+      title="Model usage over time"
+      subtitle={subtitles[metric]}
+      action={<div style={{ display: "flex", gap: 4 }}>{toggleBtn("Cost","cost")}{toggleBtn("Requests","requests")}{toggleBtn("Tokens","tokens")}</div>}
+    >
       {data.length === 0 ? <EmptyState label="No data for this period" /> : (
         <>
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={data}>
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={data}>
               <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} width={70} />
-              <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} formatter={(v: number, name: string) => [fmtCost(v), name]} />
-              {keys.map((k, i) => (
-                <Line key={k} type="monotone" dataKey={k} stroke={LINE_COLORS[i % LINE_COLORS.length]} strokeWidth={selected === null || selected === k ? 2.5 : 1} strokeOpacity={selected === null || selected === k ? 1 : 0.2} dot={false} name={k} />
+              <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtValue} width={70} />
+              <Tooltip
+                contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
+                formatter={(v: number, name: string) => [fmtValue(v), name]}
+                cursor={{ fill: "rgba(255,255,255,0.04)" }}
+              />
+              {modelList.map((model, i) => (
+                <Bar
+                  key={model}
+                  dataKey={model}
+                  stackId="models"
+                  fill={LINE_COLORS[i % LINE_COLORS.length]}
+                  fillOpacity={selected === null || selected === model ? 0.9 : 0.15}
+                  radius={i === modelList.length - 1 ? [4, 4, 0, 0] : undefined}
+                />
               ))}
-            </LineChart>
+            </BarChart>
           </ResponsiveContainer>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem 0.75rem", marginTop: "0.5rem" }}>
-            {keys.map((k, i) => (
-              <button key={k} onClick={() => setSelected(selected === k ? null : k)} style={{ background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, padding: "2px 4px", borderRadius: 4, opacity: selected === null || selected === k ? 1 : 0.35 }}>
+            {modelList.map((model, i) => (
+              <button key={model} onClick={() => setSelected(selected === model ? null : model)} style={{ background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, padding: "2px 4px", borderRadius: 4, opacity: selected === null || selected === model ? 1 : 0.35 }}>
                 <span style={{ width: 10, height: 10, borderRadius: "50%", background: LINE_COLORS[i % LINE_COLORS.length], display: "inline-block", flexShrink: 0 }} />
-                <span style={{ fontSize: "0.78rem", color: C.subtle }}>{k}</span>
+                <span style={{ fontSize: "0.78rem", color: C.subtle }}>{model}</span>
               </button>
             ))}
           </div>
@@ -338,27 +232,15 @@ function SpendChart({ records, timeseries, range }: { records: ApiCall[]; timese
 }
 
 // ─── Cost breakdown pie ────────────────────────────────────────────────────────
-function CostPieChart({ breakdown, records }: { breakdown: BreakdownRow[]; records: ApiCall[] }) {
-  const [mode, setMode] = useState<"provider" | "key">("provider");
-
-  const toggleBtn = (label: string, val: typeof mode) => (
-    <button
-      key={val}
-      onClick={() => setMode(val)}
-      style={{ background: mode === val ? C.accent : C.border, color: mode === val ? "#fff" : C.muted, border: "none", borderRadius: 6, padding: "0.25rem 0.65rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}
-    >
-      {label}
-    </button>
-  );
-
-  const pieData = mode === "provider"
-    ? Object.entries(breakdown.reduce<Record<string, number>>((acc, r) => { acc[r.provider] = (acc[r.provider] ?? 0) + r.cost_usd; return acc; }, {})).map(([name, value]) => ({ name, value }))
-    : Object.entries(records.reduce<Record<string, number>>((acc, r) => { const k = r.key_hint ? `…${r.key_hint}` : "unknown"; acc[k] = (acc[k] ?? 0) + r.cost_usd; return acc; }, {})).map(([name, value]) => ({ name, value }));
+function CostPieChart({ breakdown }: { breakdown: BreakdownRow[] }) {
+  const pieData = Object.entries(
+    breakdown.reduce<Record<string, number>>((acc, r) => { acc[r.model] = (acc[r.model] ?? 0) + r.cost_usd; return acc; }, {})
+  ).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
 
   return (
-    <Card title="Cost breakdown" subtitle="% share" action={<div style={{ display: "flex", gap: 4 }}>{toggleBtn("Provider","provider")}{toggleBtn("Key","key")}</div>}>
+    <Card title="Cost by model" subtitle="% share">
       {pieData.length > 0 ? (
-        <ResponsiveContainer width="100%" height={220}>
+        <ResponsiveContainer width="100%" height={260}>
           <PieChart>
             <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3}>
               {pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
@@ -375,10 +257,9 @@ function CostPieChart({ breakdown, records }: { breakdown: BreakdownRow[]; recor
 }
 
 // ─── Overview ─────────────────────────────────────────────────────────────────
-function OverviewPage({ summary, records, timeseries, breakdown, dashSummary, loading, range }: {
+function OverviewPage({ summary, records, breakdown, dashSummary, loading, range }: {
   summary: ApiCallSummary[];
   records: ApiCall[];
-  timeseries: TimeseriesPoint[];
   breakdown: BreakdownRow[];
   dashSummary: { total_tokens_in: number; total_tokens_out: number; total_cost_usd: number; request_count: number; avg_latency_ms: number } | undefined;
   loading: boolean;
@@ -394,25 +275,8 @@ function OverviewPage({ summary, records, timeseries, breakdown, dashSummary, lo
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem", marginBottom: "1.5rem" }}>
-        <SpendChart records={records} timeseries={timeseries} range={range} />
-        <CostPieChart breakdown={breakdown} records={records} />
-      </div>
-
-      <div style={{ marginBottom: "1.5rem" }}>
-        <Card title="Cost by model" subtitle="USD total">
-          {breakdown.length > 0 ? (
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={breakdown} barSize={28}>
-                <XAxis dataKey="model" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} />
-                <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} formatter={(v: number) => [fmtCost(v), "Cost"]} />
-                <Bar dataKey="cost_usd" fill={C.accent} radius={[4, 4, 0, 0]} name="Cost (USD)" />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <EmptyState label="No model data yet" />
-          )}
-        </Card>
+        <ModelUsageChart records={records} range={range} />
+        <CostPieChart breakdown={breakdown} />
       </div>
 
       <Card title="Recent requests" subtitle={`${records.length} total`}>
@@ -470,7 +334,7 @@ function UsagePage({ summary, records, loading }: { summary: ApiCallSummary[]; r
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
-function SettingsPage({ quota }: { quota: { limit: number; used: number; remaining: number; reset_at: number; window_ms: number } | undefined }) {
+function SettingsPage({ quota, user }: { quota: { limit: number; used: number; remaining: number; reset_at: number; window_ms: number } | undefined; user?: UserOut | null }) {
   const pct = quota ? Math.round((quota.used / quota.limit) * 100) : 0;
   const resetAt = quota ? new Date(quota.reset_at).toLocaleTimeString() : "—";
   const [sdkToken, setSdkToken] = useState<string | null>(null);
@@ -478,6 +342,9 @@ function SettingsPage({ quota }: { quota: { limit: number; used: number; remaini
   const [sdkLoading, setSdkLoading] = useState(false);
   const [recalcLoading, setRecalcLoading] = useState(false);
   const [recalcMsg, setRecalcMsg] = useState<string | null>(null);
+  const [phone, setPhone] = useState(user?.phone ?? "");
+  const [phoneSaving, setPhoneSaving] = useState(false);
+  const [phoneMsg, setPhoneMsg] = useState<string | null>(null);
 
   // Auto-load existing token on mount
   useState(() => { fetchSdkToken().then(r => setSdkToken(r.sdk_token)).catch(() => {}); });
@@ -503,6 +370,30 @@ function SettingsPage({ quota }: { quota: { limit: number; used: number; remaini
       setRecalcMsg("Failed — try again");
     } finally {
       setRecalcLoading(false);
+    }
+  }
+
+  async function handlePhoneSave() {
+    setPhoneMsg(null);
+    const trimmed = phone.replace(/\s/g, "");
+    if (!trimmed) {
+      setPhoneMsg("Please enter a phone number");
+      return;
+    }
+    if (!/^\+[1-9]\d{1,14}$/.test(trimmed)) {
+      setPhoneMsg("Use E.164 format (e.g. +15551234567)");
+      return;
+    }
+    setPhoneSaving(true);
+    try {
+      await updatePhone(trimmed);
+      setPhone(trimmed);
+      setPhoneMsg("Saved!");
+      setTimeout(() => setPhoneMsg(null), 3000);
+    } catch (err) {
+      setPhoneMsg(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setPhoneSaving(false);
     }
   }
 
@@ -570,14 +461,30 @@ function SettingsPage({ quota }: { quota: { limit: number; used: number; remaini
         </div>
       </Card>
 
-      <Card title="Alerts" subtitle="SMS alerts via Twilio when quotas are hit">
+      <Card title="SMS Alerts" subtitle="Get texted when you hit 80% or 100% of your daily token quota">
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "0.75rem" }}>
-          <LabeledInput label="Phone number" placeholder="+1 555 000 0000" />
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <input type="checkbox" id="sms-toggle" defaultChecked style={{ accentColor: C.accent }} />
-            <label htmlFor="sms-toggle" style={{ fontSize: "0.9rem", color: C.subtle }}>Enable SMS alerts at 80% / 100% quota</label>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+            <label style={{ fontSize: "0.82rem", color: C.subtle }}>Phone number (E.164 format)</label>
+            <input
+              value={phone}
+              onChange={e => setPhone(e.target.value)}
+              placeholder="+15551234567"
+              style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.5rem 0.75rem", fontSize: "0.9rem" }}
+            />
           </div>
-          <button style={{ ...btnStyle(C.accent), alignSelf: "flex-start" }}>Save alert settings</button>
+          <p style={{ margin: 0, fontSize: "0.8rem", color: C.muted }}>
+            You'll receive an SMS when your daily token usage crosses 80% and 100% of the {fmtNum(quota?.limit ?? 1_000_000)} token quota.
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <button onClick={handlePhoneSave} disabled={phoneSaving} style={{ ...btnStyle(C.accent) }}>
+              {phoneSaving ? "Saving…" : "Save phone number"}
+            </button>
+            {phoneMsg && (
+              <span style={{ fontSize: "0.85rem", color: phoneMsg === "Saved!" ? C.green : C.red }}>
+                {phoneMsg}
+              </span>
+            )}
+          </div>
         </div>
       </Card>
 
