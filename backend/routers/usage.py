@@ -160,23 +160,33 @@ async def live_usage(websocket: WebSocket, token: str):
 
     await websocket.accept()
     last_seen = datetime.now(timezone.utc)
+    ping_counter = 0
 
     try:
         while True:
             await asyncio.sleep(2)
-            new_docs = (
-                await ApiCall.find(
-                    ApiCall.user_id == uid,
-                    ApiCall.timestamp > last_seen,
+            ping_counter += 1
+            try:
+                new_docs = (
+                    await ApiCall.find(
+                        ApiCall.user_id == uid,
+                        ApiCall.timestamp > last_seen,
+                    )
+                    .sort(-ApiCall.timestamp)
+                    .to_list()
                 )
-                .sort(-ApiCall.timestamp)
-                .to_list()
-            )
-            if new_docs:
-                last_seen = new_docs[0].timestamp
-                await websocket.send_text(
-                    json.dumps([_to_out(d).model_dump(mode="json") for d in new_docs])
-                )
+                if new_docs:
+                    last_seen = new_docs[0].timestamp
+                    await websocket.send_text(
+                        json.dumps([_to_out(d).model_dump(mode="json") for d in new_docs])
+                    )
+                elif ping_counter % 15 == 0:
+                    # Send a keep-alive ping every 30s to prevent Render proxy timeout
+                    await websocket.send_text("[]")
+            except WebSocketDisconnect:
+                raise
+            except Exception:
+                pass  # keep the loop running on transient DB/serialization errors
     except WebSocketDisconnect:
         pass
 
