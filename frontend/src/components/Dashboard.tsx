@@ -306,7 +306,8 @@ function SpendChart({ records, timeseries, range }: { records: ApiCall[]; timese
     );
   }
 
-  const { data, keys } = buildSeries(records, mode === "key" ? "key" : mode, range);
+  const dim = (mode === "key" ? "key" : mode === "total" ? "provider" : mode) as "provider" | "model" | "key";
+  const { data, keys } = buildSeries(records, dim, range);
 
   return (
     <Card title="Spend over time" subtitle="USD per period" action={controls}>
