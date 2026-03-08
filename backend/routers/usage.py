@@ -68,11 +68,7 @@ async def log_usage(record: ApiCallCreate, current_user: dict = Depends(get_curr
     data = record.model_dump()
     if not data.get("cost_usd"):
         data["cost_usd"] = _calc_cost(data["model"], data.get("tokens_in", 0), data.get("tokens_out", 0))
-    # Use SDK-provided timestamp (with caller's timezone) if present
-    client_ts = data.pop("timestamp", None)
     doc = ApiCall(user_id=uid, **data)
-    if client_ts is not None:
-        doc.timestamp = client_ts
     await doc.insert()
     return _to_out(doc)
 
@@ -159,5 +155,7 @@ def _to_out(doc: ApiCall) -> ApiCallOut:
         latency_ms=doc.latency_ms,
         app_tag=doc.app_tag,
         key_hint=doc.key_hint,
+        prompt_type=doc.prompt_type,
+        complexity=doc.complexity,
         timestamp=doc.timestamp,
     )

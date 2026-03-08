@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: tokengauge
-Version: 0.2.4
+Version: 0.2.0
 Summary: Zero-config AI usage tracking — wrap any OpenAI/Anthropic/Gemini client and log to your TokenGauge dashboard
 License: MIT
 Keywords: ai,llm,openai,anthropic,gemini,token,usage,tracking,observability
@@ -23,7 +23,7 @@ Requires-Dist: google-genai>=0.1; extra == "all"
 
 # TokenGauge SDK
 
-Zero-config AI usage tracking. Wrap your existing OpenAI, Anthropic, or Google Gemini client with one line — every call is automatically logged to your [TokenGauge](https://tokengauge.onrender.com) dashboard.
+Zero-config AI usage tracking. Wrap your existing OpenAI, Anthropic, or Google Gemini client with one line — every call is automatically logged to your [TokenGauge](https://tokengauge.app) dashboard.
 
 **Your API keys stay with you.** The SDK only reads token counts from API responses and sends them to TokenGauge. Nothing is proxied.
 
@@ -35,7 +35,7 @@ pip install tokengauge
 
 ## Quick start
 
-1. Sign up at [tokengauge.onrender.com](https://tokengauge.onrender.com) and copy your SDK token from Settings.
+1. Sign up at [tokengauge.app](https://tokengauge.app) and copy your SDK token from Settings.
 
 2. Wrap your client:
 

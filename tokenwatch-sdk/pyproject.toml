@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tokengauge"
-version = "0.2.4"
+version = "0.3.0"
 description = "Zero-config AI usage tracking — wrap any OpenAI/Anthropic/Gemini client and log to your TokenGauge dashboard"
 readme = "README.md"
 license = {text = "MIT"}
