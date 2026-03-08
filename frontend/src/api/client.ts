@@ -267,6 +267,7 @@ export function createLiveSocket(onRecords: (records: ApiCall[]) => void): WebSo
   const ws = new WebSocket(wsUrl);
   ws.onmessage = (e) => {
     const records: ApiCall[] = JSON.parse(e.data);
+    if (records.length > 0) console.log("[WS] received records:", records);
     onRecords(records);
   };
   return ws;

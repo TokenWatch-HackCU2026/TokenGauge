@@ -200,9 +200,15 @@ async def live_usage(websocket: WebSocket, token: str):
         while True:
             try:
                 out = await asyncio.wait_for(queue.get(), timeout=30.0)
-                await websocket.send_text(json.dumps([out.model_dump(mode="json")]))
+                await websocket.send_text(json.dumps([out.model_dump(mode="json")], default=str))
             except asyncio.TimeoutError:
                 await websocket.send_text("[]")  # keep-alive ping
+            except WebSocketDisconnect:
+                return
+            except Exception:
+                # send_text or serialization failed; close cleanly so client reconnects
+                await websocket.close(code=1011)
+                return
     except WebSocketDisconnect:
         pass
     finally:
