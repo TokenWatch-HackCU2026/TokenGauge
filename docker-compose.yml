@@ -8,9 +8,6 @@ services:
     working_dir: /app/backend
     environment:
       - PORT=3001
-      - DB_NAME=tokengauge
-      - MONGO_URI=mongodb://mongo:27017
-      - REDIS_URL=redis://redis:6379
     env_file:
       - .env
     volumes:

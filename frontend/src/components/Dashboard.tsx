@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer,
+  ResponsiveContainer, ComposedChart, Area, Line,
 } from "recharts";
 import {
   fetchRecords, fetchSummary, fetchDashboardSummary,
@@ -763,6 +763,171 @@ const chartCardStyle: React.CSSProperties = {
 };
 const chartTitleStyle: React.CSSProperties = { fontWeight: 600, fontSize: "0.95rem" };
 
+// ─── Linear regression helpers ───────────────────────────────────────────────
+function linReg(xs: number[], ys: number[]): { slope: number; intercept: number } {
+  const n = xs.length;
+  const mx = xs.reduce((s, x) => s + x, 0) / n;
+  const my = ys.reduce((s, y) => s + y, 0) / n;
+  const num = xs.reduce((s, x, i) => s + (x - mx) * (ys[i] - my), 0);
+  const den = xs.reduce((s, x) => s + (x - mx) ** 2, 0);
+  const slope = den === 0 ? 0 : num / den;
+  return { slope, intercept: my - slope * mx };
+}
+
+function buildDailyBuckets(records: ApiCall[], windowDays: number) {
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - windowDays * 86_400_000);
+  const byDay: Record<string, number> = {};
+  for (const r of records) {
+    const d = parseTimestamp(r.timestamp);
+    if (d < cutoff) continue;
+    const key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    byDay[key] = (byDay[key] ?? 0) + r.cost_usd;
+  }
+  return Array.from({ length: windowDays + 1 }, (_, i) => {
+    const d = new Date(now.getTime() - (windowDays - i) * 86_400_000);
+    const key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    return { label: `${d.getMonth() + 1}/${d.getDate()}`, dayIndex: i, actual: byDay[key] ?? 0 };
+  });
+}
+
+// ─── Forecast Tooltip ────────────────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ForecastTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  const pt = payload[0]?.payload;
+  const trend = pt?.histTrend ?? pt?.forecastTrend;
+  return (
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: "0.6rem 0.85rem", boxShadow: "0 4px 20px rgba(0,0,0,0.4)" }}>
+      <div style={{ fontSize: "0.75rem", color: C.muted, marginBottom: 6 }}>{label}{pt?.isForecast ? " (forecast)" : ""}</div>
+      {pt?.actual !== undefined && (
+        <div style={{ fontSize: "0.82rem", marginBottom: 3 }}>
+          <span style={{ color: C.muted }}>Actual: </span>
+          <span style={{ fontWeight: 600 }}>{fmtCost(pt.actual)}</span>
+        </div>
+      )}
+      {trend !== undefined && (
+        <div style={{ fontSize: "0.82rem", marginBottom: pt?.isForecast ? 3 : 0 }}>
+          <span style={{ color: C.muted }}>{pt?.isForecast ? "Forecast: " : "Trend: "}</span>
+          <span style={{ fontWeight: 600, color: C.accentLight }}>{fmtCost(trend)}</span>
+        </div>
+      )}
+      {pt?.isForecast && pt?.lower !== undefined && (
+        <div style={{ fontSize: "0.78rem", color: C.muted }}>
+          95% CI: {fmtCost(pt.lower)} – {fmtCost(pt.lower + pt.bandWidth)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Cost Forecast Chart ──────────────────────────────────────────────────────
+function CostForecastChart({ records, mobile }: { records: ApiCall[]; mobile: boolean }) {
+  const HISTORY_DAYS = 14;
+  const FORECAST_DAYS = 7;
+  const Z = 1.96; // 95% CI
+
+  const { chartData, forecastTotal } = useMemo(() => {
+    const historical = buildDailyBuckets(records, HISTORY_DAYS);
+    const xs = historical.map(d => d.dayIndex);
+    const ys = historical.map(d => d.actual);
+    const { slope, intercept } = linReg(xs, ys);
+
+    // Standard error for confidence band
+    const n = xs.length;
+    const xbar = xs.reduce((s, x) => s + x, 0) / n;
+    const sxx = xs.reduce((s, x) => s + (x - xbar) ** 2, 0);
+    const sse = ys.reduce((s, y, i) => s + (y - (slope * xs[i] + intercept)) ** 2, 0);
+    const se = n > 2 ? Math.sqrt(sse / (n - 2)) : 0;
+
+    const predict = (xi: number) => {
+      const y = Math.max(0, slope * xi + intercept);
+      const margin = Z * se * Math.sqrt(1 / n + (xi - xbar) ** 2 / (sxx || 1));
+      return { y, lower: Math.max(0, y - margin), upper: Math.max(0, y + margin) };
+    };
+
+    const data: {
+      label: string; actual?: number;
+      histTrend?: number; forecastTrend?: number;
+      lower?: number; bandWidth?: number; isForecast: boolean;
+    }[] = historical.map(d => {
+      const { y } = predict(d.dayIndex);
+      return { label: d.label, actual: d.actual, histTrend: y, isForecast: false };
+    });
+
+    // Boundary point: last historical also starts forecast line
+    const lastXi = HISTORY_DAYS;
+    const { y: boundaryY } = predict(lastXi);
+    data[data.length - 1].forecastTrend = boundaryY;
+
+    let total = 0;
+    for (let i = 1; i <= FORECAST_DAYS; i++) {
+      const xi = HISTORY_DAYS + i;
+      const d = new Date(Date.now() + i * 86_400_000);
+      const label = `${d.getMonth() + 1}/${d.getDate()}`;
+      const { y, lower, upper } = predict(xi);
+      total += y;
+      data.push({ label, forecastTrend: y, lower, bandWidth: upper - lower, isForecast: true });
+    }
+
+    return { chartData: data, forecastTotal: total };
+  }, [records]);
+
+  if (records.length < 3) {
+    return (
+      <div style={chartCardStyle}>
+        <div style={chartTitleStyle}>7-Day Cost Forecast</div>
+        <EmptyState label="Need at least 3 records to generate a forecast" />
+      </div>
+    );
+  }
+
+  return (
+    <div style={chartCardStyle}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.5rem" }}>
+        <div>
+          <div style={chartTitleStyle}>7-Day Cost Forecast</div>
+          <div style={{ color: C.muted, fontSize: "0.78rem" }}>Linear trend on last 14 days · 95% confidence band</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: "0.75rem", color: C.muted }}>Projected 7-day spend</div>
+          <div style={{ fontWeight: 700, fontSize: "1.1rem", color: C.accentLight }}>{fmtCost(forecastTotal)}</div>
+        </div>
+      </div>
+      <ResponsiveContainer width="100%" height={mobile ? 220 : 260}>
+        <ComposedChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+          <XAxis dataKey="label" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+          <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtCost} width={54} />
+          <Tooltip content={<ForecastTooltip />} cursor={{ fill: `${C.muted}10` }} />
+          {/* Confidence band using stacked area trick */}
+          <Area dataKey="lower" stackId="band" stroke="none" fill="transparent" isAnimationActive={false} legendType="none" />
+          <Area dataKey="bandWidth" stackId="band" stroke="none" fill={C.accent} fillOpacity={0.13} isAnimationActive={false} legendType="none" />
+          {/* Actual daily cost bars */}
+          <Bar dataKey="actual" fill={C.accent} fillOpacity={0.65} radius={[3, 3, 0, 0]} isAnimationActive={false} />
+          {/* Solid trend line over historical */}
+          <Line dataKey="histTrend" stroke={C.accentLight} strokeWidth={2} dot={false} isAnimationActive={false} legendType="none" connectNulls />
+          {/* Dashed forecast line */}
+          <Line dataKey="forecastTrend" stroke={C.accentLight} strokeWidth={2} strokeDasharray="5 3" dot={false} isAnimationActive={false} legendType="none" connectNulls />
+        </ComposedChart>
+      </ResponsiveContainer>
+      <div style={{ display: "flex", gap: "1rem", marginTop: "0.5rem", fontSize: "0.75rem", color: C.muted, flexWrap: "wrap" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ width: 10, height: 10, background: C.accent, borderRadius: 2, opacity: 0.65, flexShrink: 0 }} />
+          Actual daily cost
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ width: 16, height: 2, background: C.accentLight, flexShrink: 0 }} />
+          Trend · · · Forecast
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ width: 14, height: 8, background: C.accent, borderRadius: 2, opacity: 0.15, flexShrink: 0 }} />
+          95% confidence
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // ─── Filter Bar ──────────────────────────────────────────────────────────────
 function FilterBar({ filters, onChange, options, hasActive, mobile }: {
   filters: { provider: string; appTag: string; keyHint: string };
@@ -883,8 +1048,13 @@ function OverviewPage({ summary, records, dashSummary, loading, gran, range, mob
       </div>
 
       {/* Token share — full width */}
-      <div style={{ marginBottom: "1.25rem" }}>
+      <div style={{ marginBottom: "1rem" }}>
         <TokensStackedChart records={records} range={range} mobile={mobile} />
+      </div>
+
+      {/* Cost forecast — full width */}
+      <div style={{ marginBottom: "1.25rem" }}>
+        <CostForecastChart records={records} mobile={mobile} />
       </div>
 
       <Card title="Recent requests" subtitle={`${records.length} total`}>
