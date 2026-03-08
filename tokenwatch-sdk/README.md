@@ -31,6 +31,16 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
+### Local / self-hosted server
+
+Pass `base_url` to point at your own instance (e.g. Docker on localhost):
+
+```python
+tw = TokenGauge(token="your-sdk-token", base_url="http://localhost:8000")
+```
+
+Omit `base_url` (or set it to `None`) to use the hosted TokenGauge service.
+
 ## Anthropic
 
 ```python
@@ -153,8 +163,34 @@ chatbot    = tw.wrap(openai.OpenAI(api_key="sk-..."), app_tag="chatbot")
 ## Login instead of pasting a token
 
 ```python
+# Hosted service
 tw = TokenGauge.login(email="you@example.com", password="your-password")
+
+# Self-hosted / Docker
+tw = TokenGauge.login(email="you@example.com", password="your-password", base_url="http://localhost:8000")
 ```
+
+## Spend limits
+
+If you have budget limits configured in your dashboard, the SDK checks them before each call. When an estimated call cost would exceed your remaining budget, a `BudgetExceededError` is raised — the underlying API call is never made.
+
+```python
+from tokengauge import TokenGauge, BudgetExceededError
+
+tw = TokenGauge(token="your-sdk-token")
+client = tw.wrap(openai.OpenAI(api_key="sk-..."))
+
+try:
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "Hello!"}],
+    )
+except BudgetExceededError as e:
+    print(f"Budget exceeded: {e}")
+    # e.provider, e.estimated_cost, e.remaining, e.period are available
+```
+
+Spend status is cached for 60 seconds to avoid extra latency on every call.
 
 ## What gets tracked
 

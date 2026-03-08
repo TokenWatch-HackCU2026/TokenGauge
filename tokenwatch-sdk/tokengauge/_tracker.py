@@ -15,7 +15,21 @@ import time
 from datetime import datetime
 from typing import Any
 
-__all__ = ["TokenGauge"]
+__all__ = ["TokenGauge", "BudgetExceededError"]
+
+
+class BudgetExceededError(Exception):
+    """Raised when a provider spend limit would be exceeded by the estimated call cost."""
+    def __init__(self, provider: str, estimated_cost: float, remaining: float, period: str) -> None:
+        self.provider = provider
+        self.estimated_cost = estimated_cost
+        self.remaining = remaining
+        self.period = period
+        super().__init__(
+            f"[TokenGauge] {period.capitalize()} budget exceeded for {provider}: "
+            f"estimated cost ${estimated_cost:.4f} > ${remaining:.4f} remaining"
+        )
+
 
 # ── Pricing (USD per 1 M tokens) ─────────────────────────────────────────────
 # Sources: openai.com/pricing, anthropic.com/pricing, ai.google.dev/pricing
@@ -367,6 +381,7 @@ class TokenGauge:
     def __init__(
         self,
         token: str,
+        base_url: str | None = None,
         app_tag: str | None = None,
         classify: bool = True,
         verbose: bool = False,
@@ -374,10 +389,12 @@ class TokenGauge:
         if not token:
             raise ValueError("token is required. Copy it from your TokenGauge dashboard Settings page.")
         self.token = token
-        self.base_url = self._BASE_URL
+        self.base_url = (base_url or self._BASE_URL).rstrip("/")
         self.app_tag = app_tag
         self.classify = classify
         self._verbose = verbose
+        self._spend_status_cache: dict | None = None
+        self._spend_status_fetched_at: float = 0
 
     # ── Auth ──────────────────────────────────────────────────────────────────
 
@@ -386,6 +403,7 @@ class TokenGauge:
         cls,
         email: str,
         password: str,
+        base_url: str | None = None,
         app_tag: str | None = None,
         classify: bool = True,
         verbose: bool = False,
@@ -395,13 +413,14 @@ class TokenGauge:
         Uses your persistent SDK token (1-year) so it never expires mid-session.
 
             tw = TokenGauge.login("you@example.com", "pass")
+            tw = TokenGauge.login("you@example.com", "pass", base_url="http://localhost:8000")
         """
         try:
             import httpx
         except ImportError:  # pragma: no cover
             raise ImportError("pip install httpx")
 
-        base = cls._BASE_URL
+        base = (base_url or cls._BASE_URL).rstrip("/")
 
         # Step 1: log in to get a short-lived access token
         resp = httpx.post(
@@ -426,7 +445,7 @@ class TokenGauge:
             # Fall back to short-lived access token if SDK token fetch fails
             token = access_token
 
-        return cls(token=token, app_tag=app_tag, classify=classify, verbose=verbose)
+        return cls(token=token, base_url=base, app_tag=app_tag, classify=classify, verbose=verbose)
 
     # ── Wrap ──────────────────────────────────────────────────────────────────
 
@@ -478,6 +497,7 @@ class TokenGauge:
 
         def _create(*args: Any, **kwargs: Any) -> Any:
             messages = kwargs.get("messages")
+            tw._check_budget("openai", kwargs.get("model", "unknown"), messages)
             start = time.monotonic()
             response = _orig(*args, **kwargs)
             ts = datetime.now().astimezone().isoformat()
@@ -510,6 +530,7 @@ class TokenGauge:
 
         async def _create(*args: Any, **kwargs: Any) -> Any:
             messages = kwargs.get("messages")
+            tw._check_budget("openai", kwargs.get("model", "unknown"), messages)
             start = time.monotonic()
             response = await _orig(*args, **kwargs)
             ts = datetime.now().astimezone().isoformat()
@@ -546,6 +567,7 @@ class TokenGauge:
             system = kwargs.get("system")
             if system and messages:
                 messages = [{"role": "system", "content": system}] + list(messages)
+            tw._check_budget("anthropic", kwargs.get("model", "unknown"), messages)
             start = time.monotonic()
             response = _orig(*args, **kwargs)
             ts = datetime.now().astimezone().isoformat()
@@ -581,6 +603,7 @@ class TokenGauge:
             system = kwargs.get("system")
             if system and messages:
                 messages = [{"role": "system", "content": system}] + list(messages)
+            tw._check_budget("anthropic", kwargs.get("model", "unknown"), messages)
             start = time.monotonic()
             response = await _orig(*args, **kwargs)
             ts = datetime.now().astimezone().isoformat()
@@ -615,6 +638,8 @@ class TokenGauge:
         def _generate(*args: Any, **kwargs: Any) -> Any:
             # google.genai: contents is 2nd positional arg or kwarg
             contents = kwargs.get("contents", args[1] if len(args) > 1 else None)
+            _model_arg = kwargs.get("model", args[0] if args else "gemini")
+            tw._check_budget("google", str(_model_arg).split("/")[-1], contents)
             start = time.monotonic()
             response = _orig(*args, **kwargs)
             ts = datetime.now().astimezone().isoformat()
@@ -654,6 +679,7 @@ class TokenGauge:
         def _generate(*args: Any, **kwargs: Any) -> Any:
             # Legacy SDK: first positional arg is the content/prompt
             contents = args[0] if args else kwargs.get("contents")
+            tw._check_budget("google", model_name or "gemini", contents)
             start = time.monotonic()
             response = _orig(*args, **kwargs)
             ts = datetime.now().astimezone().isoformat()
@@ -675,6 +701,54 @@ class TokenGauge:
 
         client.generate_content = _generate
         return client
+
+    # ── Budget check ──────────────────────────────────────────────────────────
+
+    _SPEND_CACHE_TTL = 60.0  # seconds
+
+    def _get_spend_status(self) -> dict | None:
+        """Fetch /dashboard/spend-status, cached for 60 s."""
+        now = time.monotonic()
+        if (
+            self._spend_status_cache is not None
+            and (now - self._spend_status_fetched_at) < self._SPEND_CACHE_TTL
+        ):
+            return self._spend_status_cache
+        try:
+            import httpx
+            resp = httpx.get(
+                f"{self.base_url}/dashboard/spend-status",
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=5,
+            )
+            if resp.is_success:
+                self._spend_status_cache = resp.json()
+                self._spend_status_fetched_at = now
+                return self._spend_status_cache
+        except Exception:
+            pass
+        return self._spend_status_cache  # return stale cache on error
+
+    def _check_budget(self, provider: str, model: str, messages: Any) -> None:
+        """Estimate call cost and raise BudgetExceededError if the spend limit would be exceeded."""
+        text = _extract_text(messages)
+        est_in = max(10, len(text) // 4)
+        est_out = max(10, est_in * 2 // 5)
+        est_cost = _calc_cost(model, est_in, est_out)
+        status = self._get_spend_status()
+        if not status:
+            return
+        for entry in status.get("statuses", []):
+            if entry.get("provider") == provider and entry.get("enabled"):
+                remaining = float(entry.get("remaining_usd", float("inf")))
+                if est_cost > remaining:
+                    raise BudgetExceededError(
+                        provider=provider,
+                        estimated_cost=est_cost,
+                        remaining=remaining,
+                        period=entry.get("period", "unknown"),
+                    )
+                break
 
     # ── Logging ───────────────────────────────────────────────────────────────
 
