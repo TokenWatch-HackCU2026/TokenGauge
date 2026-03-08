@@ -184,11 +184,44 @@ async def atlas_webhook(request: Request, x_atlas_secret: str = Header(None)):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     payload = await request.json()
-    user_id: str = payload.get("user_id", "")
-    doc: dict = payload.get("document", {})
 
-    if not user_id or not doc:
-        raise HTTPException(status_code=422, detail="Missing user_id or document")
+    # Support raw Atlas change event format (direct webhook) or our custom format
+    if "fullDocument" in payload:
+        # Raw Atlas change event
+        full = payload["fullDocument"]
+        def extract_id(v):
+            # Handle Extended JSON: {"$oid": "..."} or plain string
+            if isinstance(v, dict):
+                return str(v.get("$oid", v))
+            return str(v)
+        def extract_dt(v):
+            if isinstance(v, dict):
+                return v.get("$date", v)
+            return v
+        user_id = extract_id(full.get("user_id", ""))
+        doc = {
+            "id": extract_id(full.get("_id", "")),
+            "user_id": user_id,
+            "provider": full.get("provider", ""),
+            "model": full.get("model", ""),
+            "tokens_in": full.get("tokens_in", 0),
+            "tokens_out": full.get("tokens_out", 0),
+            "cost_usd": full.get("cost_usd", 0.0),
+            "latency_ms": full.get("latency_ms", 0),
+            "app_tag": full.get("app_tag"),
+            "key_hint": full.get("key_hint"),
+            "prompt_type": full.get("prompt_type"),
+            "complexity": full.get("complexity"),
+            "timestamp": extract_dt(full.get("timestamp")),
+            "cost_flag": None,
+        }
+    else:
+        # Custom format sent by Atlas Function
+        user_id = payload.get("user_id", "")
+        doc = payload.get("document", {})
+
+    if not user_id:
+        raise HTTPException(status_code=422, detail="Missing user_id")
 
     try:
         out = ApiCallOut(**doc)
