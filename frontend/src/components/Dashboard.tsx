@@ -95,8 +95,8 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
   });
   const { data: records = [], isLoading } = useQuery({
     queryKey: ["records"],
-    queryFn: () => fetchRecords(5000),
-    refetchInterval: 3000,
+    queryFn: () => fetchRecords(500),
+    refetchInterval: 10000,
     placeholderData: () => loadCache<ApiCall[]>("records") ?? [],
   });
   useEffect(() => { if (records.length > 0) saveCache("records", records); }, [records]);
@@ -519,7 +519,7 @@ function buildBarData(
   // Build rows from timeline
   let rows = timeline.map(({ sort }) => {
     const d = new Date(sort.includes("T") ? sort : sort + "T00:00");
-    const row: Record<string, string | number> = { date: detailDate(d, gran) };
+    const row: Record<string, string | number> = { date: detailRange(d, gran) };
     for (const m of models) row[m] = filled[sort]?.[m] ?? 0;
     return row;
   });
@@ -833,7 +833,7 @@ function forecastBinCount(range: Range): number {
 }
 
 // Human-readable date for tooltip display
-function detailDate(d: Date, gran: Granularity): string {
+function fmtDateShort(d: Date, gran: Granularity): string {
   const mon = d.toLocaleString("default", { month: "short" });
   const day = d.getDate();
   const h = d.getHours();
@@ -847,10 +847,43 @@ function detailDate(d: Date, gran: Granularity): string {
     case "1day": case "2day":
       return `${mon} ${day}`;
     case "1week":
-      return `Week of ${mon} ${day}`;
+      return `${mon} ${day}`;
     case "1month":
       return `${d.toLocaleString("default", { month: "long" })} ${d.getFullYear()}`;
   }
+}
+
+// Compute the end date for a bucket starting at `start` with given granularity
+function binEndDate(start: Date, gran: Granularity): Date {
+  const end = new Date(start);
+  switch (gran) {
+    case "15s":  end.setSeconds(end.getSeconds() + 15); break;
+    case "15min": end.setMinutes(end.getMinutes() + 15); break;
+    case "1hr":  end.setHours(end.getHours() + 1); break;
+    case "4hr":  end.setHours(end.getHours() + 4); break;
+    case "12hr": end.setHours(end.getHours() + 12); break;
+    case "1day": end.setDate(end.getDate() + 1); break;
+    case "2day": end.setDate(end.getDate() + 2); break;
+    case "1week": end.setDate(end.getDate() + 7); break;
+    case "1month": end.setMonth(end.getMonth() + 1); break;
+  }
+  // Step back 1ms so it's the last moment of the bin, not the start of the next
+  end.setTime(end.getTime() - 1);
+  return end;
+}
+
+function detailRange(start: Date, gran: Granularity): string {
+  // For 1-day and sub-day bins with same calendar day, just show a single label
+  if (gran === "1day") return fmtDateShort(start, gran);
+  if (gran === "1month") return fmtDateShort(start, gran);
+
+  const end = binEndDate(start, gran);
+  const startStr = fmtDateShort(start, gran);
+  const endStr = fmtDateShort(end, gran);
+
+  // If start and end format identically (shouldn't happen but safety), show single
+  if (startStr === endStr) return startStr;
+  return `${startStr} – ${endStr}`;
 }
 
 function buildForecastBuckets(records: ApiCall[], range: Range) {
@@ -869,11 +902,11 @@ function buildForecastBuckets(records: ApiCall[], range: Range) {
   return timeline.map(({ sort }, i) => ({
     bucketIndex: i,
     actual: filled[sort] ?? 0,
-    detail: detailDate(new Date(sort.includes("T") ? sort : sort + "T00:00"), gran),
+    detail: detailRange(new Date(sort.includes("T") ? sort : sort + "T00:00"), gran),
   }));
 }
 
-// Advance a date by one granularity step and return the detail label
+// Advance a date by one granularity step and return the detail range label
 function advanceBucket(cursor: Date, gran: Granularity): string {
   switch (gran) {
     case "15s":  cursor.setSeconds(cursor.getSeconds() + 15); break;
@@ -886,7 +919,7 @@ function advanceBucket(cursor: Date, gran: Granularity): string {
     case "1week": cursor.setDate(cursor.getDate() + 7); break;
     case "1month": cursor.setMonth(cursor.getMonth() + 1); break;
   }
-  return detailDate(cursor, gran);
+  return detailRange(cursor, gran);
 }
 
 // ─── Forecast Tooltip ────────────────────────────────────────────────────────
@@ -1502,28 +1535,6 @@ function SettingsPage({ quota, user, mobile }: { quota: { limit: number; used: n
           <p style={{ margin: 0, fontSize: "0.8rem", color: C.muted }}>
             Use the same token across all your projects — tag them with <code style={{ background: C.bg, padding: "2px 4px", borderRadius: 3 }}>app_tag</code> to tell them apart.
           </p>
-        </div>
-      </Card>
-
-      <Card title="Fix $0.00 costs" subtitle="Recalculates cost for records that logged as $0.00 due to unrecognized model names">
-        <div style={{ marginTop: "0.75rem", display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          <button onClick={handleRecalculate} disabled={recalcLoading} style={{ ...btnStyle(C.accent) }}>
-            {recalcLoading ? "Recalculating…" : "Recalculate costs"}
-          </button>
-          {recalcMsg && <span style={{ fontSize: "0.85rem", color: C.subtle }}>{recalcMsg}</span>}
-        </div>
-      </Card>
-
-      <Card title="Rate limit quota" subtitle={`Resets at ${resetAt}`}>
-        <div style={{ marginTop: "0.75rem" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", marginBottom: "0.4rem" }}>
-            <span style={{ color: C.subtle }}>{fmtNum(quota?.used ?? 0)} used</span>
-            <span style={{ color: C.muted }}>{fmtNum(quota?.limit ?? 0)} limit</span>
-          </div>
-          <div style={{ height: 8, background: C.border, borderRadius: 4, overflow: "hidden" }}>
-            <div style={{ height: "100%", width: `${pct}%`, background: pct > 80 ? C.red : pct > 60 ? C.yellow : C.accent, borderRadius: 4, transition: "width 0.4s" }} />
-          </div>
-          <div style={{ fontSize: "0.8rem", color: C.muted, marginTop: "0.4rem" }}>{pct}% used · {fmtNum(quota?.remaining ?? 0)} remaining</div>
         </div>
       </Card>
 
