@@ -11,6 +11,7 @@ import {
   ApiCall, ApiCallSummary, BreakdownRow, UserOut,
 } from "../api/client";
 import { C, PROVIDER_COLORS, PIE_COLORS, LINE_COLORS, GaugeLogo } from "../theme";
+import { saveCache, loadCache } from "../api/cache";
 
 // ─── SVG Icons ───────────────────────────────────────────────────────────────
 function IconMenu() {
@@ -119,7 +120,9 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
     queryKey: ["records"],
     queryFn: () => fetchRecords(100),
     refetchInterval: 3000,
+    placeholderData: () => loadCache<ApiCall[]>("records") ?? [],
   });
+  useEffect(() => { if (records.length > 0) saveCache("records", records); }, [records]);
   const { data: quota } = useQuery({
     queryKey: ["quota"],
     queryFn: fetchQuota,
