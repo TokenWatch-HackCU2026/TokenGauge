@@ -23,8 +23,38 @@ services:
         value: "15"
       - key: REFRESH_TOKEN_EXPIRE_DAYS
         value: "7"
+      - key: REDIS_URL
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
       - key: FRONTEND_URL
         value: https://tokengauge.onrender.com
+
+  # ── arq Background Worker (SMS alerts, webhooks, spike detection) ──
+  - type: worker
+    name: tokengauge-worker
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: .
+    plan: free
+    dockerCommand: python -m arq redis.worker.WorkerSettings
+    envVars:
+      - key: DB_NAME
+        value: tokengauge
+      - key: MONGO_URI
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
 
   # ── React Frontend (Static Site) ──
   - type: web

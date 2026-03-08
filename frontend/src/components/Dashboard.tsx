@@ -479,17 +479,17 @@ function generateTimeline(range: Range, gran: Granularity): { sort: string; labe
 function rangeToBarGranularity(range: Range): Granularity {
   switch (range) {
     case "live":  return "15min";
-    case "1D":    return "1hr";
-    case "1W":    return "4hr";
-    case "1M":    return "1day";
-    case "3M":    return "2day";
+    case "1D":    return "4hr";
+    case "1W":    return "12hr";
+    case "1M":    return "2day";
+    case "3M":    return "1week";
     case "YTD": case "1Y": return "1week";
-    case "ALL":   return "1week";
+    case "ALL":   return "1month";
   }
 }
 
 const MAX_GROUPED_BINS = 20;
-const MAX_STACKED_BINS = 60;
+const MAX_STACKED_BINS = 30;
 
 // Build bar-chart-ready data from raw records
 function buildBarData(
@@ -764,7 +764,7 @@ function TokensStackedChart({ records, range, mobile }: { records: ApiCall[]; ra
         <div style={{ color: C.muted, fontSize: "0.78rem" }}>Relative proportion per time bucket (100% normalized)</div>
       </div>
       <ResponsiveContainer width="100%" height={mobile ? 240 : 280}>
-        <BarChart data={normData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }} barCategoryGap="1%">
+        <BarChart data={normData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }} barCategoryGap="8%">
           <XAxis dataKey="date" hide />
           <YAxis domain={[0, 100]} tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `${v}%`} width={40} />
           <Tooltip

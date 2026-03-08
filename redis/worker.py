@@ -53,17 +53,28 @@ async def deliver_webhook(ctx: dict, url: str, payload: dict) -> dict:
             raise
 
 
-async def send_sms_alert(ctx: dict, user_id: str, alert_type: str, message: str) -> None:
+async def send_sms_alert(ctx: dict, user_id: str, phone: str, alert_type: str, message: str) -> None:
     """
     Send an SMS alert via Twilio.
-    Placeholder — wired up when Twilio credentials are available (post-MVP).
 
     alert_type: "quota_80" | "quota_100" | "spike"
     """
-    logger.info("SMS alert [%s] queued for user %s: %s", alert_type, user_id, message)
-    # TODO: integrate Twilio client here
-    # twilio_client = ctx.get("twilio")
-    # twilio_client.messages.create(to=..., from_=..., body=message)
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+    from_number = os.getenv("TWILIO_PHONE_NUMBER")
+
+    if not all([account_sid, auth_token, from_number]):
+        logger.warning("Twilio credentials not configured — skipping SMS for user %s", user_id)
+        return
+
+    try:
+        from twilio.rest import Client
+        client = Client(account_sid, auth_token)
+        msg = client.messages.create(to=phone, from_=from_number, body=message)
+        logger.info("SMS sent [%s] to %s for user %s — SID: %s", alert_type, phone, user_id, msg.sid)
+    except Exception as exc:
+        logger.error("Twilio SMS failed for user %s: %s", user_id, exc)
+        raise  # arq will retry
 
 
 async def run_usage_summary(ctx: dict, user_id: str, week_start: str) -> None:
