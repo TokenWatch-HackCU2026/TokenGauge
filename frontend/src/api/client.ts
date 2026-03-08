@@ -106,6 +106,7 @@ export interface ApiCall {
   cost_usd: number;
   latency_ms: number;
   app_tag: string | null;
+  key_hint: string | null;
   timestamp: string;
 }
 

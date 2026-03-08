@@ -48,6 +48,7 @@ class ApiCallCreate(BaseModel):
     cost_usd: float
     latency_ms: int
     app_tag: Optional[str] = None
+    key_hint: Optional[str] = None
 
 
 class ApiCallOut(ApiCallCreate):

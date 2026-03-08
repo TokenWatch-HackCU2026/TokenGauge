@@ -434,7 +434,7 @@ function RequestsTable({ records }: { records: ApiCall[] }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
         <thead>
           <tr>
-            {["Time", "Provider", "Model", "App Tag", "In", "Out", "Latency", "Cost"].map(h => (
+            {["Time", "Provider", "Model", "App Tag", "Key", "In", "Out", "Latency", "Cost"].map(h => (
               <th key={h} style={{ textAlign: "left", padding: "0.5rem 0.75rem", color: C.muted, fontSize: "0.8rem", fontWeight: 500, borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" }}>{h}</th>
             ))}
           </tr>
@@ -446,6 +446,7 @@ function RequestsTable({ records }: { records: ApiCall[] }) {
               <td style={tdStyle}><ProviderBadge provider={r.provider} small /></td>
               <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: "0.8rem" }}>{r.model}</td>
               <td style={{ ...tdStyle, color: C.muted }}>{r.app_tag ?? "—"}</td>
+              <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: "0.78rem", color: C.muted }}>{r.key_hint ? `…${r.key_hint}` : "—"}</td>
               <td style={tdStyle}>{r.tokens_in.toLocaleString()}</td>
               <td style={tdStyle}>{r.tokens_out.toLocaleString()}</td>
               <td style={{ ...tdStyle, color: C.subtle }}>{r.latency_ms}ms</td>

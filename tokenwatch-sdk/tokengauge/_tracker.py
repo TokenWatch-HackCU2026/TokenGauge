@@ -276,6 +276,7 @@ class TokenGauge:
     def _wrap_openai_sync(self, client: Any, app_tag: str | None) -> Any:
         tw = self
         _orig = client.chat.completions.create
+        key_hint = self._extract_key_hint(client)
 
         def _create(*args: Any, **kwargs: Any) -> Any:
             start = time.monotonic()
@@ -291,6 +292,7 @@ class TokenGauge:
                     tokens_out=getattr(usage, "completion_tokens", 0),
                     latency_ms=latency_ms,
                     app_tag=app_tag,
+                    key_hint=key_hint,
                 )
             return response
 
@@ -302,6 +304,7 @@ class TokenGauge:
     def _wrap_openai_async(self, client: Any, app_tag: str | None) -> Any:
         tw = self
         _orig = client.chat.completions.create
+        key_hint = self._extract_key_hint(client)
 
         async def _create(*args: Any, **kwargs: Any) -> Any:
             start = time.monotonic()
@@ -317,6 +320,7 @@ class TokenGauge:
                     tokens_out=getattr(usage, "completion_tokens", 0),
                     latency_ms=latency_ms,
                     app_tag=app_tag,
+                    key_hint=key_hint,
                 )
             return response
 
@@ -328,6 +332,7 @@ class TokenGauge:
     def _wrap_anthropic_sync(self, client: Any, app_tag: str | None) -> Any:
         tw = self
         _orig = client.messages.create
+        key_hint = self._extract_key_hint(client)
 
         def _create(*args: Any, **kwargs: Any) -> Any:
             start = time.monotonic()
@@ -343,6 +348,7 @@ class TokenGauge:
                     tokens_out=getattr(usage, "output_tokens", 0),
                     latency_ms=latency_ms,
                     app_tag=app_tag,
+                    key_hint=key_hint,
                 )
             return response
 
@@ -354,6 +360,7 @@ class TokenGauge:
     def _wrap_anthropic_async(self, client: Any, app_tag: str | None) -> Any:
         tw = self
         _orig = client.messages.create
+        key_hint = self._extract_key_hint(client)
 
         async def _create(*args: Any, **kwargs: Any) -> Any:
             start = time.monotonic()
@@ -369,6 +376,7 @@ class TokenGauge:
                     tokens_out=getattr(usage, "output_tokens", 0),
                     latency_ms=latency_ms,
                     app_tag=app_tag,
+                    key_hint=key_hint,
                 )
             return response
 
@@ -381,6 +389,7 @@ class TokenGauge:
         """Wraps google.genai.Client — model name is passed per-call."""
         tw = self
         _orig = client.models.generate_content
+        key_hint = self._extract_key_hint(client)
 
         def _generate(*args: Any, **kwargs: Any) -> Any:
             start = time.monotonic()
@@ -398,6 +407,7 @@ class TokenGauge:
                     tokens_out=getattr(meta, "candidates_token_count", 0),
                     latency_ms=latency_ms,
                     app_tag=app_tag,
+                    key_hint=key_hint,
                 )
             return response
 
@@ -408,6 +418,7 @@ class TokenGauge:
 
     def _wrap_gemini(self, client: Any, app_tag: str | None) -> Any:
         tw = self
+        key_hint = self._extract_key_hint(client)
         model_name = getattr(client, "model_name", None) or getattr(client, "_model_name", "gemini")
         # Normalize "models/gemini-2.0-flash" -> "gemini-2.0-flash"
         if model_name and "/" in model_name:
@@ -427,6 +438,7 @@ class TokenGauge:
                     tokens_out=getattr(meta, "candidates_token_count", 0),
                     latency_ms=latency_ms,
                     app_tag=app_tag,
+                    key_hint=key_hint,
                 )
             return response
 
@@ -434,6 +446,14 @@ class TokenGauge:
         return client
 
     # ── Logging ───────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _extract_key_hint(client: Any) -> str | None:
+        """Return last 4 chars of the provider API key, or None if not found."""
+        key = getattr(client, "api_key", None)
+        if key and len(key) >= 4:
+            return key[-4:]
+        return None
 
     def _log(
         self,
@@ -443,11 +463,12 @@ class TokenGauge:
         tokens_out: int,
         latency_ms: int,
         app_tag: str | None,
+        key_hint: str | None = None,
     ) -> None:
         """Fire-and-forget: log in a background thread so the caller is never blocked."""
         threading.Thread(
             target=self._send,
-            args=(provider, model, tokens_in, tokens_out, latency_ms, app_tag),
+            args=(provider, model, tokens_in, tokens_out, latency_ms, app_tag, key_hint),
             daemon=False,
         ).start()
 
@@ -462,6 +483,7 @@ class TokenGauge:
         tokens_out: int,
         latency_ms: int,
         app_tag: str | None,
+        key_hint: str | None = None,
     ) -> None:
         import sys
         try:
@@ -477,6 +499,7 @@ class TokenGauge:
                     "cost_usd": _calc_cost(model, tokens_in, tokens_out),
                     "latency_ms": latency_ms,
                     "app_tag": app_tag,
+                    "key_hint": key_hint,
                 },
                 headers={"Authorization": f"Bearer {self.token}"},
                 timeout=5,
