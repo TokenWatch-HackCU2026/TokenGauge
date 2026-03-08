@@ -248,12 +248,23 @@ export function recalculateCosts(): Promise<{ recalculated: number }> {
 export function createLiveSocket(onRecords: (records: ApiCall[]) => void): WebSocket {
   const token = localStorage.getItem("access_token") ?? "";
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  // On Render, the static CDN drops WS upgrade headers, so connect directly to the API service.
-  // Derives tokengauge-api.onrender.com from tokengauge.onrender.com at runtime.
-  const wsHost = window.location.hostname.endsWith(".onrender.com")
-    ? window.location.hostname.replace(/^([^.]+)/, "$1-api")
-    : window.location.host;
-  const ws = new WebSocket(`${proto}//${wsHost}/usage/ws/live?token=${encodeURIComponent(token)}`);
+
+  // Resolve the WebSocket host. Priority:
+  // 1. VITE_API_URL build-time env var (explicit override)
+  // 2. Render pattern: tokengauge.onrender.com → tokengauge-api.onrender.com
+  // 3. Dev fallback: current host, routed through Vite proxy
+  const envApiUrl = import.meta.env.VITE_API_URL;
+  let wsHost: string;
+  if (envApiUrl) {
+    wsHost = envApiUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  } else if (window.location.hostname.endsWith(".onrender.com")) {
+    wsHost = window.location.hostname.replace(/^([^.]+)/, "$1-api");
+  } else {
+    wsHost = window.location.host; // dev: Vite proxy handles WS upgrade
+  }
+
+  const wsUrl = `${proto}//${wsHost}/usage/ws/live?token=${encodeURIComponent(token)}`;
+  const ws = new WebSocket(wsUrl);
   ws.onmessage = (e) => {
     const records: ApiCall[] = JSON.parse(e.data);
     onRecords(records);
