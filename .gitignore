@@ -6,3 +6,5 @@ __pycache__/
 *.db
 .env
 venv/
+.local/
+fix_index.py
