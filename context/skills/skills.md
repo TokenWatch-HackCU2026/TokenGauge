@@ -1,6 +1,6 @@
-# TokenWatch — Skills & Patterns
+# TokenGauge — Skills & Patterns
 
-Reusable implementation patterns and code conventions for the TokenWatch codebase.
+Reusable implementation patterns and code conventions for the TokenGauge codebase.
 
 ---
 

@@ -55,7 +55,13 @@
       "Bash(cd /Users/james-vallery/Desktop/Code/HACKCU_2026/backend && python3 -m pytest tests/test_usage.py -v 2>&1)",
       "Bash(cd /Users/james-vallery/Desktop/Code/HACKCU_2026/backend && source venv/bin/activate && python -m pytest tests/test_usage.py -v 2>&1)",
       "Bash(source venv/bin/activate && python -m pytest tests/test_proxy.py -v 2>&1)",
-      "Bash(ls -la /Users/james-vallery/Desktop/Code/HACKCU_2026/frontend/ | grep -E \"\\\\.\\(config|ts|json\\)$\")"
+      "Bash(ls -la /Users/james-vallery/Desktop/Code/HACKCU_2026/frontend/ | grep -E \"\\\\.\\(config|ts|json\\)$\")",
+      "Bash(git pull --rebase origin main)",
+      "Bash(git stash && git pull --rebase origin main && git stash pop)",
+      "Bash(docker compose ps 2>/dev/null || docker-compose ps 2>/dev/null)",
+      "Bash(docker compose logs frontend 2>&1)",
+      "Bash(docker compose run --rm frontend npm run dev -- --host 2>&1 | head -30)",
+      "Bash(docker compose run --rm frontend sh -c \"cat package.json | head -20\" 2>&1)"
     ]
   }
 }

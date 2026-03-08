@@ -1,4 +1,4 @@
-# TokenWatch — REST API Reference
+# TokenGauge — REST API Reference
 
 Two auth types are used:
 - 🔒 **JWT** — short-lived access token for web app sessions (`Authorization: Bearer <jwt>`)
@@ -160,7 +160,7 @@ Revoke an SDK token immediately. Any SDK using it will stop being able to ingest
 
 ---
 
-## Usage Ingestion (SDK → TokenWatch)
+## Usage Ingestion (SDK → TokenGauge)
 
 ### `POST /usage`
 Ingest a single usage record from the SDK. 🗝️ SDK Token
@@ -256,7 +256,7 @@ Register a webhook to receive usage events. 🔒 JWT
 
 **Request**
 ```json
-{ "url": "https://my-app.com/hooks/tokenwatch" }
+{ "url": "https://my-app.com/hooks/tokengauge" }
 ```
 **Response `201`**
 ```json

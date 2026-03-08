@@ -1,5 +1,5 @@
 """
-Shared pytest fixtures for TokenWatch backend tests.
+Shared pytest fixtures for TokenGauge backend tests.
 Runs against a live server at BASE_URL (default: http://localhost:3001).
 Requires: pytest, httpx, python-dotenv
 """

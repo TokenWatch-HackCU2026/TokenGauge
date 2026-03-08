@@ -1,23 +1,23 @@
-# TokenWatch — Requirements
+# TokenGauge — Requirements
 
 ## Functional Requirements
 
 ### MVP
 
-#### FR-1: TokenWatch SDK (Python)
-- FR-1.1: Provide a `tokenwatch` Python package installable via pip
-- FR-1.2: SDK accepts a long-lived TokenWatch SDK token at initialization
+#### FR-1: TokenGauge SDK (Python)
+- FR-1.1: Provide a `tokengauge` Python package installable via pip
+- FR-1.2: SDK accepts a long-lived TokenGauge SDK token at initialization
 - FR-1.3: `tw.wrap(client)` wraps any supported provider client (OpenAI, Anthropic, Google, Mistral)
 - FR-1.4: Wrapped client behaves identically to the original — no API surface changes
 - FR-1.5: After each API response, SDK extracts tokens_in, tokens_out, model, latency_ms from response metadata
 - FR-1.6: SDK calculates cost_usd using a local pricing table
 - FR-1.7: SDK fires a non-blocking background POST to `POST /usage/` with the captured data
-- FR-1.8: If TokenWatch is unreachable, SDK queues the event locally and retries — user's app is never blocked or delayed
+- FR-1.8: If TokenGauge is unreachable, SDK queues the event locally and retries — user's app is never blocked or delayed
 - FR-1.9: Support optional `app_tag` parameter on wrap() or per-call for per-application tracking
 - FR-1.10: SDK never receives, transmits, or stores the user's provider API key
 
-#### FR-2: TokenWatch SDK (JavaScript / TypeScript)
-- FR-2.1: Provide a `tokenwatch` npm package
+#### FR-2: TokenGauge SDK (JavaScript / TypeScript)
+- FR-2.1: Provide a `tokengauge` npm package
 - FR-2.2: Same wrap() pattern as Python SDK
 - FR-2.3: Works in Node.js environments (not browser — SDK token must not be exposed client-side)
 - FR-2.4: TypeScript types included
@@ -30,7 +30,7 @@
 - FR-3.5: Google OAuth support for sign-in
 
 #### FR-4: SDK Token Management
-- FR-4.1: Users can generate long-lived SDK tokens (`tw-...`) from their dashboard
+- FR-4.1: Users can generate long-lived SDK tokens (`tg-...`) from their dashboard
 - FR-4.2: Tokens can be named (e.g. "production", "staging", "local")
 - FR-4.3: Raw token shown exactly once at creation — not stored in plaintext, only hash kept
 - FR-4.4: Users can list their tokens (shows name, creation date, last used — never raw value)
@@ -63,7 +63,7 @@
 #### FR-8: Query Classifier
 - FR-8.1: SDK optionally scores every prompt for complexity (1–10) before sending
 - FR-8.2: Classify prompt type: code, creative, analysis, chat, other
-- FR-8.3: Classification sent alongside usage record to TokenWatch
+- FR-8.3: Classification sent alongside usage record to TokenGauge
 
 #### FR-9: Model Optimizer
 - FR-9.1: SDK optionally re-routes request to cheapest capable model before sending to provider
@@ -96,10 +96,10 @@
 ## Non-Functional Requirements
 
 ### Security
-- NFR-S1: TokenWatch never receives, stores, or transmits provider API keys — they remain entirely in the user's environment
+- NFR-S1: TokenGauge never receives, stores, or transmits provider API keys — they remain entirely in the user's environment
 - NFR-S2: SDK tokens stored as hashed values only; raw token shown once at creation
 - NFR-S3: SDK tokens are write-only — scoped to usage ingestion, cannot read data or manage account
-- NFR-S4: All TokenWatch API traffic over TLS 1.3
+- NFR-S4: All TokenGauge API traffic over TLS 1.3
 - NFR-S5: JWT access tokens expire after 15 minutes; refresh tokens after 7 days
 - NFR-S6: Passwords hashed with bcrypt (min cost factor 12)
 
@@ -121,7 +121,7 @@
 ### Developer Experience
 - NFR-DX1: SDK setup requires changing 2 lines of code maximum
 - NFR-DX2: SDK works with existing provider client versions — no forced upgrades
-- NFR-DX3: OpenAPI spec for all TokenWatch API endpoints
+- NFR-DX3: OpenAPI spec for all TokenGauge API endpoints
 - NFR-DX4: Docker compose for local development (api + frontend + MongoDB + Redis)
 - NFR-DX5: Dashboard shows copy-paste integration snippets for each provider + language
 

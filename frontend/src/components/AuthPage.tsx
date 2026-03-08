@@ -78,7 +78,7 @@ export default function AuthPage({ onAuth }: Props) {
             ⬡
           </div>
           <div style={{ fontWeight: 700, fontSize: "1.4rem", letterSpacing: "-0.03em" }}>
-            TokenWatch
+            TokenGauge
           </div>
           <div style={{ color: C.muted, fontSize: "0.875rem", marginTop: "0.25rem" }}>
             {mode === "login" ? "Sign in to your account" : "Create your account"}

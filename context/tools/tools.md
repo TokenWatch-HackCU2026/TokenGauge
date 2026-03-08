@@ -1,4 +1,4 @@
-# TokenWatch — Tools & Technologies
+# TokenGauge — Tools & Technologies
 
 ## Core Stack
 
@@ -27,7 +27,7 @@
   - `session:{userId}` — JWT validation cache (TTL 300s)
   - `dashboard:{userId}:{hash}` — query result cache (TTL 60s)
   - `cache:{hash(prompt+params)}` — prompt response cache (configurable TTL)
-  - `valid_keys` — Redis Set of active TokenWatch API keys (O(1) SISMEMBER lookup)
+  - `valid_keys` — Redis Set of active TokenGauge API keys (O(1) SISMEMBER lookup)
 - **Pub/Sub channel**: `new_api_call` — published after every proxy request; dashboard subscribes for live updates
 
 ---
@@ -145,5 +145,5 @@
 
 ## GitHub Project Board
 - **URL**: https://github.com/orgs/TokenWatch-HackCU2026/projects/1
-- **Repo**: https://github.com/TokenWatch-HackCU2026/TokenWatch
+- **Repo**: https://github.com/TokenWatch-HackCU2026/TokenGauge
 - Use `gh issue create` + `gh project item-add` to add todos to the board
