@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Root Dockerfile — builds the full stack into a single container
 # Useful for simple deployments or Cloud Run single-service mode
 
