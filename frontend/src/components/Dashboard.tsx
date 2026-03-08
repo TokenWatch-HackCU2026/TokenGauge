@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip,
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from "recharts";
 import {
@@ -197,25 +197,26 @@ function ModelUsageChart({ records, range }: { records: ApiCall[]; range: string
       {data.length === 0 ? <EmptyState label="No data for this period" /> : (
         <>
           <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={data}>
+            <LineChart data={data}>
               <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtValue} width={70} />
               <Tooltip
                 contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
                 formatter={(v: number, name: string) => [fmtValue(v), name]}
-                cursor={{ fill: "rgba(255,255,255,0.04)" }}
               />
               {modelList.map((model, i) => (
-                <Bar
+                <Line
                   key={model}
+                  type="monotone"
                   dataKey={model}
-                  stackId="models"
-                  fill={LINE_COLORS[i % LINE_COLORS.length]}
-                  fillOpacity={selected === null || selected === model ? 0.9 : 0.15}
-                  radius={i === modelList.length - 1 ? [4, 4, 0, 0] : undefined}
+                  stroke={LINE_COLORS[i % LINE_COLORS.length]}
+                  strokeWidth={selected === null || selected === model ? 2.5 : 1}
+                  strokeOpacity={selected === null || selected === model ? 1 : 0.15}
+                  dot={false}
+                  name={model}
                 />
               ))}
-            </BarChart>
+            </LineChart>
           </ResponsiveContainer>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem 0.75rem", marginTop: "0.5rem" }}>
             {modelList.map((model, i) => (
