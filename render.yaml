@@ -15,6 +15,8 @@ services:
         sync: false  # set this in the Render dashboard
       - key: JWT_SECRET
         sync: false  # set a permanent value in the Render dashboard
+      - key: JWT_REFRESH_SECRET
+        sync: false  # set a permanent value in the Render dashboard
       - key: JWT_ALGORITHM
         value: HS256
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
