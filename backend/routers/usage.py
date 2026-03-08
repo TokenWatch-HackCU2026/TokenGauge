@@ -164,7 +164,7 @@ async def live_usage(websocket: WebSocket, token: str):
 
     try:
         while True:
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
             ping_counter += 1
             try:
                 new_docs = (
@@ -180,7 +180,7 @@ async def live_usage(websocket: WebSocket, token: str):
                     await websocket.send_text(
                         json.dumps([_to_out(d).model_dump(mode="json") for d in new_docs])
                     )
-                elif ping_counter % 15 == 0:
+                elif ping_counter % 30 == 0:
                     # Send a keep-alive ping every 30s to prevent Render proxy timeout
                     await websocket.send_text("[]")
             except WebSocketDisconnect:
