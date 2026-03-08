@@ -1,5 +1,6 @@
 README.md
 pyproject.toml
+tests/test_classifier.py
 tokengauge/__init__.py
 tokengauge/_tracker.py
 tokengauge.egg-info/PKG-INFO

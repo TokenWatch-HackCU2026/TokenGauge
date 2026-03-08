@@ -277,7 +277,7 @@ function SpendChart({ records, timeseries, range }: { records: ApiCall[]; timese
                 <Tooltip
                   contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
                   cursor={{ strokeDasharray: "3 3" }}
-                  formatter={(v: number, name: string) => name === "y" ? [fmtCost(v), "Cost"] : [new Date(v as number).toLocaleString(), "Time"]}
+                  formatter={(v: number, name: string) => name === "y" ? [fmtCost(v), "Cost"] : [new Date(v as number).toLocaleString(undefined, { timeZoneName: 'short' }), "Time"]}
                 />
                 {scatterKeys.map((k, i) => (
                   <Scatter
@@ -606,7 +606,7 @@ function RequestsTable({ records }: { records: ApiCall[] }) {
         <tbody>
           {records.map(r => (
             <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-              <td style={tdStyle}>{new Date(r.timestamp).toLocaleString()}</td>
+              <td style={tdStyle}>{new Date(r.timestamp).toLocaleString(undefined, { timeZoneName: 'short' })}</td>
               <td style={tdStyle}><ProviderBadge provider={r.provider} small /></td>
               <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: "0.8rem" }}>{r.model}</td>
               <td style={{ ...tdStyle, color: C.muted }}>{r.app_tag ?? "—"}</td>
