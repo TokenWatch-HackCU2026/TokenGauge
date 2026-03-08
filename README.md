@@ -15,3 +15,7 @@ cd frontend
 npm install
 npm run dev
 ```
+
+Demo Account Login (https://tokengauge.onrender.com/):
+  - Email: demo@tokengauge.dev
+  - Password: demodemo123
