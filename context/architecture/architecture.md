@@ -166,3 +166,26 @@ Collections:
 - After each usage event ingested: arq enqueues POST to all registered webhooks
 - Payload: `{ userId, provider, model, tokensIn, tokensOut, costUsd, timestamp }`
 - Retry up to 3 times with exponential backoff
+
+---
+
+## Deployment (Render)
+
+Production is hosted on Render using a Blueprint (`render.yaml` at repo root).
+
+| Service | Render Type | Details |
+|---------|-------------|---------|
+| `tokengauge-api` | Web Service (Docker) | FastAPI backend, `backend/Dockerfile`, port 8000 |
+| `tokengauge` | Static Site | React frontend, `cd frontend && npm ci && npm run build` |
+| `tokengauge-redis` | Key Value (Valkey 8) | Managed Redis instance |
+| MongoDB | External | MongoDB Atlas (free M0 cluster) |
+
+- Frontend uses Render **rewrite rules** to proxy `/api/*`, `/usage/*`, `/dashboard/*` to the API service
+- Backend Docker image requires `ca-certificates` + `certifi` for MongoDB Atlas TLS
+- CORS is configured via `FRONTEND_URL` env var on the API service
+- `MONGO_URI` must include `?retryWrites=true&w=majority` (no spaces!)
+
+### TokenGauge SDK (`tokengauge` on PyPI)
+- Python SDK that wraps provider clients (OpenAI, Anthropic, Google)
+- Captures usage data in the background, POSTs to `/usage/` on the API
+- Source: `tokenwatch-sdk/` directory in this repo
