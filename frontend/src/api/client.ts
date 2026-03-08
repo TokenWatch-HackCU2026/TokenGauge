@@ -24,7 +24,9 @@ async function refreshAccessToken(): Promise<boolean> {
 }
 
 async function get<T>(path: string): Promise<T> {
+  console.log(`[API] GET ${BASE + path}`);
   let res = await fetch(BASE + path, { headers: authHeaders() });
+  console.log(`[API] GET ${BASE + path} → ${res.status} ${res.statusText}`);
   if (res.status === 401) {
     const ok = await refreshAccessToken();
     if (ok) res = await fetch(BASE + path, { headers: authHeaders() });
@@ -34,11 +36,14 @@ async function get<T>(path: string): Promise<T> {
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  let res = await fetch(BASE + path, {
+  const url = BASE + path;
+  console.log(`[API] POST ${url}`, body);
+  let res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
   });
+  console.log(`[API] POST ${url} → ${res.status} ${res.statusText}`);
   if (res.status === 401 && path !== "/api/v1/auth/refresh") {
     const ok = await refreshAccessToken();
     if (ok) {

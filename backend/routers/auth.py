@@ -46,16 +46,26 @@ async def _issue_tokens(user: User) -> tuple[str, str]:
 
 @router.post("/register", status_code=201)
 async def register(body: RegisterRequest):
-    if await User.find_one(User.email == body.email):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
-    user = User(
-        email=body.email,
-        password_hash=hash_password(body.password),
-        full_name=body.full_name,
-    )
-    await user.insert()
-    access, refresh = await _issue_tokens(user)
-    return {"access_token": access, "refresh_token": refresh, "user": _user_out(user)}
+    print(f"[REGISTER] Received registration request for email={body.email}")
+    try:
+        if await User.find_one(User.email == body.email):
+            print(f"[REGISTER] Email already exists: {body.email}")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+        user = User(
+            email=body.email,
+            password_hash=hash_password(body.password),
+            full_name=body.full_name,
+        )
+        await user.insert()
+        print(f"[REGISTER] User created: {user.id}")
+        access, refresh = await _issue_tokens(user)
+        print(f"[REGISTER] Tokens issued for user {user.id}")
+        return {"access_token": access, "refresh_token": refresh, "user": _user_out(user)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[REGISTER] ERROR: {type(e).__name__}: {e}")
+        raise
 
 
 @router.post("/login")
