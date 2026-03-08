@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -16,9 +17,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="TokenWatch API", lifespan=lifespan)
 
+allowed_origins = [
+    "http://localhost:5173",
+]
+if os.getenv("FRONTEND_URL"):
+    allowed_origins.append(os.getenv("FRONTEND_URL"))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

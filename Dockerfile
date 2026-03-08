@@ -1,0 +1,71 @@
+# Root Dockerfile — builds the full stack into a single container
+# Useful for simple deployments or Cloud Run single-service mode
+
+# Stage 1: Build frontend
+FROM node:20-alpine AS frontend-build
+
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ .
+RUN npm run build
+
+# Stage 2: Production image
+FROM python:3.11-slim
+
+# Install nginx and supervisor
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends nginx supervisor gettext-base && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend code
+COPY backend/ backend/
+COPY redis/ redis/
+
+# Copy built frontend
+COPY --from=frontend-build /app/frontend/dist /usr/share/nginx/html
+
+# Nginx config — proxies API routes to uvicorn on localhost:8000
+COPY frontend/nginx.conf /etc/nginx/templates/default.conf.template
+ENV API_URL=http://127.0.0.1:8000
+
+# Render nginx config from template
+RUN envsubst '${API_URL}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && \
+    rm -f /etc/nginx/sites-enabled/default
+
+# Supervisor config to run both nginx and uvicorn
+RUN cat <<'EOF' > /etc/supervisor/conf.d/tokenwatch.conf
+[supervisord]
+nodaemon=true
+logfile=/dev/stdout
+logfile_maxbytes=0
+
+[program:api]
+command=uvicorn main:app --host 127.0.0.1 --port 8000
+directory=/app/backend
+autostart=true
+autorestart=true
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+
+[program:nginx]
+command=nginx -g "daemon off;"
+autostart=true
+autorestart=true
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+EOF
+
+EXPOSE 8080
+
+CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]

@@ -1,0 +1,101 @@
+steps:
+  # Build backend image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/tokenwatch/api:$SHORT_SHA'
+      - '-f'
+      - 'backend/Dockerfile'
+      - '.'
+    id: build-api
+
+  # Build frontend image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/tokenwatch/frontend:$SHORT_SHA'
+      - '-f'
+      - 'frontend/Dockerfile'
+      - './frontend'
+    id: build-frontend
+
+  # Push backend image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/tokenwatch/api:$SHORT_SHA']
+    waitFor: ['build-api']
+    id: push-api
+
+  # Push frontend image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/tokenwatch/frontend:$SHORT_SHA']
+    waitFor: ['build-frontend']
+    id: push-frontend
+
+  # Deploy API to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'tokenwatch-api'
+      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/tokenwatch/api:$SHORT_SHA'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--port=8000'
+      - '--allow-unauthenticated'
+      - '--set-secrets=JWT_SECRET=jwt-secret:latest,MONGODB_URI=mongodb-uri:latest,REDIS_URL=redis-url:latest'
+      - '--memory=512Mi'
+      - '--cpu=1'
+      - '--min-instances=0'
+      - '--max-instances=5'
+    waitFor: ['push-api']
+    id: deploy-api
+
+  # Deploy Frontend to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'tokenwatch-frontend'
+      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/tokenwatch/frontend:$SHORT_SHA'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--port=80'
+      - '--allow-unauthenticated'
+      - '--set-env-vars=API_URL=https://tokenwatch-api-${_CLOUD_RUN_SUFFIX}.a.run.app'
+      - '--memory=256Mi'
+      - '--cpu=1'
+      - '--min-instances=0'
+      - '--max-instances=3'
+    waitFor: ['push-frontend', 'deploy-api']
+    id: deploy-frontend
+
+  # Deploy Worker to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'tokenwatch-worker'
+      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/tokenwatch/api:$SHORT_SHA'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--no-allow-unauthenticated'
+      - '--set-secrets=MONGODB_URI=mongodb-uri:latest,REDIS_URL=redis-url:latest'
+      - '--command=python,-m,arq,workers.worker.WorkerSettings'
+      - '--memory=512Mi'
+      - '--cpu=1'
+      - '--min-instances=1'
+      - '--max-instances=3'
+    waitFor: ['push-api']
+    id: deploy-worker
+
+substitutions:
+  _REGION: us-central1
+  _CLOUD_RUN_SUFFIX: ''  # Set this after first deploy or use a custom domain
+
+options:
+  logging: CLOUD_LOGGING_ONLY
