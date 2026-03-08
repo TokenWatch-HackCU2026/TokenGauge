@@ -8,7 +8,6 @@ import {
   fetchRecords, fetchSummary, fetchDashboardSummary,
   fetchBreakdown, fetchQuota,
   fetchSdkToken, regenerateSdkToken, recalculateCosts, updatePhone,
-  createLiveSocket,
   ApiCall, ApiCallSummary, BreakdownRow, UserOut,
 } from "../api/client";
 import { C, PROVIDER_COLORS, PIE_COLORS, LINE_COLORS, GaugeLogo } from "../theme";
@@ -119,55 +118,13 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
   const { data: records = [], isLoading } = useQuery({
     queryKey: ["records"],
     queryFn: () => fetchRecords(100),
+    refetchInterval: 3000,
   });
   const { data: quota } = useQuery({
     queryKey: ["quota"],
     queryFn: fetchQuota,
   });
 
-  // ── Live WebSocket ───────────────────────────────────────────────────────────
-  const [liveRecords, setLiveRecords] = useState<ApiCall[]>([]);
-  const [isLive, setIsLive] = useState(false);
-
-  useEffect(() => {
-    let ws: WebSocket;
-    let reconnectTimeout: number;
-    let dead = false;
-
-    function connect() {
-      ws = createLiveSocket((newRecs) => {
-        setLiveRecords(prev => {
-          const existingIds = new Set(prev.map(r => r.id));
-          const fresh = newRecs.filter(r => !existingIds.has(r.id));
-          return [...fresh, ...prev].slice(0, 200);
-        });
-      });
-      ws.onopen = () => setIsLive(true);
-      ws.onclose = () => {
-        setIsLive(false);
-        if (!dead) reconnectTimeout = window.setTimeout(connect, 3000);
-      };
-      ws.onerror = () => setIsLive(false);
-    }
-
-    connect();
-
-    return () => {
-      dead = true;
-      clearTimeout(reconnectTimeout);
-      ws.close();
-    };
-  }, []);
-
-  // Merge live records with fetched, deduplicated, newest first
-  const allRecords = useMemo(() => {
-    const seen = new Set<string>();
-    const result: ApiCall[] = [];
-    for (const r of [...liveRecords, ...records]) {
-      if (!seen.has(r.id)) { seen.add(r.id); result.push(r); }
-    }
-    return result;
-  }, [liveRecords, records]);
 
   const sidebar = (
     <aside style={{
@@ -311,15 +268,15 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
                 </button>
               ))}
             </div>
-            {!mobile && <Pill color={isLive ? C.green : C.muted}>{isLive ? "● Live" : "○ Connecting…"}</Pill>}
+            {!mobile && <Pill color={C.green}>● Live</Pill>}
           </div>
         </header>
 
         <div style={{ flex: 1, padding: mobile ? "1rem" : "1.75rem 2rem", overflow: "auto" }}>
           {page === "overview" && (
-            <OverviewPage summary={summary} records={allRecords} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} gran={gran} range={range} mobile={mobile} />
+            <OverviewPage summary={summary} records={records} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} gran={gran} range={range} mobile={mobile} />
           )}
-          {page === "usage" && <UsagePage summary={summary} records={allRecords} loading={isLoading} mobile={mobile} />}
+          {page === "usage" && <UsagePage summary={summary} records={records} loading={isLoading} mobile={mobile} />}
           {page === "settings" && <SettingsPage quota={quota} user={user} mobile={mobile} />}
         </div>
       </main>
