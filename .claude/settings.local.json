@@ -66,7 +66,8 @@
       "Bash(npm run build 2>&1 | tail -20)",
       "Bash(cd /Users/james-vallery/Desktop/Code/HACKCU_2026/tokenwatch-sdk && pip3 install --break-system-packages pytest 2>&1 | tail -3 && python3 -m pytest tests/test_classifier.py -v 2>&1)",
       "Bash(cd /Users/james-vallery/Desktop/Code/HACKCU_2026/frontend && npx tsc --noEmit 2>&1)",
-      "Bash(python3 -c \"\nimport asyncio\nfrom dotenv import load_dotenv\nload_dotenv\\(\\)\nfrom database import connect_db, disconnect_db\nfrom models import User\n\nasync def check\\(\\):\n    await connect_db\\(\\)\n    users = await User.find_all\\(\\).to_list\\(\\)\n    for u in users:\n        print\\(f'{u.email}  has_pw={bool\\(u.password_hash\\)}  id={u.id}'\\)\n    await disconnect_db\\(\\)\n\nasyncio.run\\(check\\(\\)\\)\n\" 2>&1)"
+      "Bash(python3 -c \"\nimport asyncio\nfrom dotenv import load_dotenv\nload_dotenv\\(\\)\nfrom database import connect_db, disconnect_db\nfrom models import User\n\nasync def check\\(\\):\n    await connect_db\\(\\)\n    users = await User.find_all\\(\\).to_list\\(\\)\n    for u in users:\n        print\\(f'{u.email}  has_pw={bool\\(u.password_hash\\)}  id={u.id}'\\)\n    await disconnect_db\\(\\)\n\nasyncio.run\\(check\\(\\)\\)\n\" 2>&1)",
+      "Bash(python3 -c \"\nimport asyncio\nfrom dotenv import load_dotenv\nload_dotenv\\(\\)\nfrom database import connect_db, disconnect_db\nfrom models import User\n\nasync def fix\\(\\):\n    await connect_db\\(\\)\n    user = await User.find_one\\(User.email == 'james@tokengauge.dev'\\)\n    user.is_demo = False\n    user.full_name = 'James Vallery'\n    await user.save\\(\\)\n    print\\(f'Fixed: is_demo={user.is_demo}, full_name={user.full_name}'\\)\n    await disconnect_db\\(\\)\n\nasyncio.run\\(fix\\(\\)\\)\n\" 2>&1)"
     ]
   },
   "enabledPlugins": {
