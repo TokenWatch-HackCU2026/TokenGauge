@@ -11,6 +11,7 @@ from __future__ import annotations
 import inspect
 import threading
 import time
+from datetime import datetime
 from typing import Any
 
 __all__ = ["TokenGauge"]
@@ -281,6 +282,7 @@ class TokenGauge:
         def _create(*args: Any, **kwargs: Any) -> Any:
             start = time.monotonic()
             response = _orig(*args, **kwargs)
+            ts = datetime.now().astimezone().isoformat()
             latency_ms = int((time.monotonic() - start) * 1000)
             model = getattr(response, "model", None) or kwargs.get("model", "unknown")
             usage = getattr(response, "usage", None)
@@ -293,6 +295,7 @@ class TokenGauge:
                     latency_ms=latency_ms,
                     app_tag=app_tag,
                     key_hint=key_hint,
+                    timestamp=ts,
                 )
             return response
 
@@ -309,6 +312,7 @@ class TokenGauge:
         async def _create(*args: Any, **kwargs: Any) -> Any:
             start = time.monotonic()
             response = await _orig(*args, **kwargs)
+            ts = datetime.now().astimezone().isoformat()
             latency_ms = int((time.monotonic() - start) * 1000)
             model = getattr(response, "model", None) or kwargs.get("model", "unknown")
             usage = getattr(response, "usage", None)
@@ -321,6 +325,7 @@ class TokenGauge:
                     latency_ms=latency_ms,
                     app_tag=app_tag,
                     key_hint=key_hint,
+                    timestamp=ts,
                 )
             return response
 
@@ -337,6 +342,7 @@ class TokenGauge:
         def _create(*args: Any, **kwargs: Any) -> Any:
             start = time.monotonic()
             response = _orig(*args, **kwargs)
+            ts = datetime.now().astimezone().isoformat()
             latency_ms = int((time.monotonic() - start) * 1000)
             model = getattr(response, "model", None) or kwargs.get("model", "unknown")
             usage = getattr(response, "usage", None)
@@ -349,6 +355,7 @@ class TokenGauge:
                     latency_ms=latency_ms,
                     app_tag=app_tag,
                     key_hint=key_hint,
+                    timestamp=ts,
                 )
             return response
 
@@ -365,6 +372,7 @@ class TokenGauge:
         async def _create(*args: Any, **kwargs: Any) -> Any:
             start = time.monotonic()
             response = await _orig(*args, **kwargs)
+            ts = datetime.now().astimezone().isoformat()
             latency_ms = int((time.monotonic() - start) * 1000)
             model = getattr(response, "model", None) or kwargs.get("model", "unknown")
             usage = getattr(response, "usage", None)
@@ -377,6 +385,7 @@ class TokenGauge:
                     latency_ms=latency_ms,
                     app_tag=app_tag,
                     key_hint=key_hint,
+                    timestamp=ts,
                 )
             return response
 
@@ -394,6 +403,7 @@ class TokenGauge:
         def _generate(*args: Any, **kwargs: Any) -> Any:
             start = time.monotonic()
             response = _orig(*args, **kwargs)
+            ts = datetime.now().astimezone().isoformat()
             latency_ms = int((time.monotonic() - start) * 1000)
             model_name = kwargs.get("model", args[0] if args else "gemini")
             if isinstance(model_name, str) and "/" in model_name:
@@ -408,6 +418,7 @@ class TokenGauge:
                     latency_ms=latency_ms,
                     app_tag=app_tag,
                     key_hint=key_hint,
+                    timestamp=ts,
                 )
             return response
 
@@ -428,6 +439,7 @@ class TokenGauge:
         def _generate(*args: Any, **kwargs: Any) -> Any:
             start = time.monotonic()
             response = _orig(*args, **kwargs)
+            ts = datetime.now().astimezone().isoformat()
             latency_ms = int((time.monotonic() - start) * 1000)
             meta = getattr(response, "usage_metadata", None)
             if meta:
@@ -439,6 +451,7 @@ class TokenGauge:
                     latency_ms=latency_ms,
                     app_tag=app_tag,
                     key_hint=key_hint,
+                    timestamp=ts,
                 )
             return response
 
@@ -471,11 +484,12 @@ class TokenGauge:
         latency_ms: int,
         app_tag: str | None,
         key_hint: str | None = None,
+        timestamp: str | None = None,
     ) -> None:
         """Fire-and-forget: log in a background thread so the caller is never blocked."""
         threading.Thread(
             target=self._send,
-            args=(provider, model, tokens_in, tokens_out, latency_ms, app_tag, key_hint),
+            args=(provider, model, tokens_in, tokens_out, latency_ms, app_tag, key_hint, timestamp),
             daemon=False,
         ).start()
 
@@ -491,6 +505,7 @@ class TokenGauge:
         latency_ms: int,
         app_tag: str | None,
         key_hint: str | None = None,
+        timestamp: str | None = None,
     ) -> None:
         import sys
         try:
@@ -507,6 +522,7 @@ class TokenGauge:
                     "latency_ms": latency_ms,
                     "app_tag": app_tag,
                     "key_hint": key_hint,
+                    "timestamp": timestamp,
                 },
                 headers={"Authorization": f"Bearer {self.token}"},
                 timeout=5,
