@@ -102,17 +102,33 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
   const [isLive, setIsLive] = useState(false);
 
   useEffect(() => {
-    const ws = createLiveSocket((newRecs) => {
-      setLiveRecords(prev => {
-        const existingIds = new Set(prev.map(r => r.id));
-        const fresh = newRecs.filter(r => !existingIds.has(r.id));
-        return [...fresh, ...prev].slice(0, 200);
+    let ws: WebSocket;
+    let reconnectTimeout: number;
+    let dead = false;
+
+    function connect() {
+      ws = createLiveSocket((newRecs) => {
+        setLiveRecords(prev => {
+          const existingIds = new Set(prev.map(r => r.id));
+          const fresh = newRecs.filter(r => !existingIds.has(r.id));
+          return [...fresh, ...prev].slice(0, 200);
+        });
       });
-    });
-    ws.onopen = () => setIsLive(true);
-    ws.onclose = () => setIsLive(false);
-    ws.onerror = () => setIsLive(false);
-    return () => ws.close();
+      ws.onopen = () => setIsLive(true);
+      ws.onclose = () => {
+        setIsLive(false);
+        if (!dead) reconnectTimeout = window.setTimeout(connect, 3000);
+      };
+      ws.onerror = () => setIsLive(false);
+    }
+
+    connect();
+
+    return () => {
+      dead = true;
+      clearTimeout(reconnectTimeout);
+      ws.close();
+    };
   }, []);
 
   // Merge live records with fetched, deduplicated, newest first
