@@ -1,6 +1,6 @@
 # TokenGauge SDK
 
-Zero-config AI usage tracking. Wrap your existing OpenAI, Anthropic, or Google Gemini client with one line — every call is automatically logged to your [TokenGauge](https://tokengauge.onrender.com) dashboard.
+Zero-config AI usage tracking + model recommendations. Wrap your existing OpenAI, Anthropic, or Google Gemini client with one line — every call is automatically logged to your [TokenGauge](https://tokengauge.onrender.com) dashboard. Or ask the SDK which model to use before you even make a call.
 
 **Your API keys stay with you.** The SDK only reads token counts from API responses and sends them to TokenGauge. Nothing is proxied.
 
@@ -83,6 +83,66 @@ async def main():
 asyncio.run(main())
 ```
 
+## Model recommendations
+
+Not sure which model to use? `recommend_model()` classifies your prompt locally, estimates the cost, and scores every model by success probability — no API call required.
+
+```python
+tw = TokenGauge(token="your-sdk-token")
+
+rec = tw.recommend_model(
+    messages=[{"role": "user", "content": "Refactor this Python class to use dataclasses..."}],
+    provider="anthropic",   # optional: also return best within this provider
+    budget_usd=0.05,        # optional: exclude models above this cost estimate
+)
+
+print(rec["prompt_type"])                              # "code"
+print(rec["complexity"])                               # 1–10 score
+print(rec["best_overall"]["model"])                    # e.g. "claude-opus-4.6"
+print(rec["best_overall"]["success_probability"])      # e.g. 1.0
+print(rec["best_overall"]["estimated_cost_usd"])       # e.g. 0.00047
+print(rec["within_provider"]["model"])                 # best Anthropic model
+```
+
+### What's returned
+
+```python
+{
+  "prompt_type": "code",          # classified category
+  "complexity": 4,                # estimated complexity 1–10
+  "estimated_tokens_in": 312,     # rough token estimate
+  "best_overall": {               # best model across all providers
+    "model": "claude-opus-4.6",
+    "provider": "anthropic",
+    "quality_score": 10,
+    "estimated_tokens_in": 312,
+    "estimated_tokens_out": 124,
+    "estimated_cost_usd": 0.00469,
+    "success_probability": 1.0
+  },
+  "within_provider": { ... }      # best model within your preferred provider
+}
+```
+
+### How it works
+
+| Step | What happens |
+|---|---|
+| Classify | Prompt is matched against 8 categories: `code`, `chat`, `summarization`, `analysis`, `creative`, `extraction`, `translation`, `other` |
+| Estimate | Token count estimated from text length (~4 chars/token); output estimated at 40% of input |
+| Score | Each model gets a success probability based on its type-specific quality score minus a penalty for complexity above its ceiling |
+| Rank | Models sorted by success probability, then cheapest on tie; budget filter applied if set |
+
+Prompt text is **never sent anywhere** — classification runs entirely on your machine.
+
+### Supported models in the registry
+
+| Provider | Models |
+|---|---|
+| OpenAI | gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, gpt-4o, gpt-4o-mini, o3, o3-mini, o4-mini |
+| Anthropic | claude-opus-4.6, claude-sonnet-4.6, claude-haiku-4-5, claude-3-7-sonnet, claude-3-5-sonnet, claude-3-5-haiku |
+| Google | gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash, gemini-2.0-flash-lite |
+
 ## Tag calls by feature
 
 ```python
@@ -106,4 +166,6 @@ tw = TokenGauge.login(email="you@example.com", password="your-password")
 | Tokens out | Completion token count |
 | Cost (USD) | Calculated from current model pricing |
 | Latency | End-to-end request time in ms |
+| Prompt type | Auto-classified category (code, chat, analysis, etc.) |
+| Complexity | Estimated complexity score 1–10 |
 | App tag | Optional label you set per-client |
