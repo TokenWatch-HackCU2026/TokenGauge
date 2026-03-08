@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tokengauge"
+version = "0.1.7"
+description = "Zero-config AI usage tracking — wrap any OpenAI/Anthropic/Gemini client and log to your TokenGauge dashboard"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+keywords = ["ai", "llm", "openai", "anthropic", "gemini", "token", "usage", "tracking", "observability"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = ["httpx>=0.24"]
+
+[project.optional-dependencies]
+openai     = ["openai>=1.0"]
+anthropic  = ["anthropic>=0.20"]
+google     = ["google-genai>=0.1"]
+all        = ["openai>=1.0", "anthropic>=0.20", "google-genai>=0.1"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tokengauge*"]

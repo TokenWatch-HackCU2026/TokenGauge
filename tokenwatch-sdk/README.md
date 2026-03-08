@@ -1,0 +1,109 @@
+# TokenGauge SDK
+
+Zero-config AI usage tracking. Wrap your existing OpenAI, Anthropic, or Google Gemini client with one line — every call is automatically logged to your [TokenGauge](https://tokengauge.app) dashboard.
+
+**Your API keys stay with you.** The SDK only reads token counts from API responses and sends them to TokenGauge. Nothing is proxied.
+
+## Install
+
+```bash
+pip install tokengauge
+```
+
+## Quick start
+
+1. Sign up at [tokengauge.app](https://tokengauge.app) and copy your SDK token from Settings.
+
+2. Wrap your client:
+
+```python
+from tokengauge import TokenGauge
+import openai
+
+tw = TokenGauge(token="your-sdk-token")
+client = tw.wrap(openai.OpenAI(api_key="sk-..."))
+
+# Use exactly as before — usage appears on your dashboard automatically
+response = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(response.choices[0].message.content)
+```
+
+## Anthropic
+
+```python
+from tokengauge import TokenGauge
+import anthropic
+
+tw = TokenGauge(token="your-sdk-token")
+client = tw.wrap(anthropic.Anthropic(api_key="sk-ant-..."))
+
+response = client.messages.create(
+    model="claude-3-5-sonnet-20241022",
+    max_tokens=256,
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(response.content[0].text)
+```
+
+## Google Gemini
+
+```python
+from tokengauge import TokenGauge
+from google import genai
+
+tw = TokenGauge(token="your-sdk-token")
+client = tw.wrap(genai.Client(api_key="your-gemini-key"))
+
+response = client.models.generate_content(
+    model="gemini-1.5-flash",
+    contents="Hello!",
+)
+print(response.text)
+```
+
+## Async clients
+
+```python
+from tokengauge import TokenGauge
+import openai, asyncio
+
+tw = TokenGauge(token="your-sdk-token")
+client = tw.wrap(openai.AsyncOpenAI(api_key="sk-..."))
+
+async def main():
+    response = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "Hello!"}],
+    )
+    print(response.choices[0].message.content)
+
+asyncio.run(main())
+```
+
+## Tag calls by feature
+
+```python
+summarizer = tw.wrap(openai.OpenAI(api_key="sk-..."), app_tag="summarizer")
+chatbot    = tw.wrap(openai.OpenAI(api_key="sk-..."), app_tag="chatbot")
+```
+
+## Login instead of pasting a token
+
+```python
+tw = TokenGauge.login(email="you@example.com", password="your-password")
+```
+
+## What gets tracked
+
+| Field | Description |
+|---|---|
+| Provider | openai / anthropic / google |
+| Model | e.g. gpt-4o-mini, claude-3-5-sonnet |
+| Tokens in | Prompt token count |
+| Tokens out | Completion token count |
+| Cost (USD) | Calculated from current model pricing |
+| Latency | End-to-end request time in ms |
+| App tag | Optional label you set per-client |
