@@ -1,4 +1,4 @@
-# TokenWatch — Requirements
+# TokenGauge — Requirements
 
 ## Functional Requirements
 

@@ -1,4 +1,4 @@
-# TokenWatch
+# TokenGauge
 
 ## Running
 

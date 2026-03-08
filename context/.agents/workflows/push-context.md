@@ -19,23 +19,23 @@ The personal context folders (`.memory/`, `.prompts/`, `.agents/`) are gitignore
 1. Check git status to see what has changed.
 
 ```bash
-cd /Users/Matthew/Desktop/CompSci/TokenWatch && git status
+cd /Users/Matthew/Desktop/CompSci/TokenGauge && git status
 ```
 
 2. Stage only the overall context files (never the ignored personal folders).
 
 ```bash
-cd /Users/Matthew/Desktop/CompSci/TokenWatch && git add context/architecture/ context/requirements/ context/skills/ context/tools/ context/.gitignore README.md
+cd /Users/Matthew/Desktop/CompSci/TokenGauge && git add context/architecture/ context/requirements/ context/skills/ context/tools/ context/.gitignore README.md
 ```
 
 3. Commit with a timestamped message if there are staged changes.
 
 ```bash
-cd /Users/Matthew/Desktop/CompSci/TokenWatch && git diff --cached --quiet || git commit -m "chore: auto-update project context [$(date '+%Y-%m-%d %H:%M')]"
+cd /Users/Matthew/Desktop/CompSci/TokenGauge && git diff --cached --quiet || git commit -m "chore: auto-update project context [$(date '+%Y-%m-%d %H:%M')]"
 ```
 
 4. Push the commit to origin/main.
 
 ```bash
-cd /Users/Matthew/Desktop/CompSci/TokenWatch && git push origin main
+cd /Users/Matthew/Desktop/CompSci/TokenGauge && git push origin main
 ```

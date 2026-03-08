@@ -1,11 +1,11 @@
-# TokenWatch — System Architecture
+# TokenGauge — System Architecture
 
 ## Overview
 
-TokenWatch is a personal AI gateway and usage intelligence platform. All AI provider traffic routes through the TokenWatch proxy, enabling unified logging, cost tracking, key security, rate limiting, and model optimization.
+TokenGauge is a personal AI gateway and usage intelligence platform. All AI provider traffic routes through the TokenGauge proxy, enabling unified logging, cost tracking, key security, rate limiting, and model optimization.
 
 ```
-User App → TokenWatch Proxy → AI Provider (Anthropic / OpenAI / Google / Mistral)
+User App → TokenGauge Proxy → AI Provider (Anthropic / OpenAI / Google / Mistral)
                  ↓
          Usage Logger → MongoDB (api_calls)
                  ↓
@@ -20,7 +20,7 @@ User App → TokenWatch Proxy → AI Provider (Anthropic / OpenAI / Google / Mis
 
 ### 1. AI Gateway / Proxy
 - Intercepts all incoming AI requests
-- Authenticates the calling user via JWT or TokenWatch API key
+- Authenticates the calling user via JWT or TokenGauge API key
 - Looks up the user's stored provider API key (decrypts via AWS KMS in-memory only)
 - Forwards the request to the target AI provider
 - Captures response, measures latency, calculates token cost
@@ -83,7 +83,7 @@ Collections:
 
 ## Request Flow (Proxy)
 
-1. Client sends POST `/proxy/{provider}/{model}` with `Authorization: Bearer <tokenwatch-jwt>`
+1. Client sends POST `/proxy/{provider}/{model}` with `Authorization: Bearer <tokengauge-jwt>`
 2. Gateway middleware validates JWT → extracts userId
 3. Redis rate limiter checks sliding window → reject if over quota
 4. Key vault retrieves encrypted blob for this user+provider → KMS decrypts → raw key in memory

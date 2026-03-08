@@ -1,4 +1,4 @@
-# TokenWatch — REST API Reference
+# TokenGauge — REST API Reference
 
 All endpoints are prefixed with `/api/v1`. Protected routes require `Authorization: Bearer <access_token>`.
 
@@ -165,7 +165,7 @@ Delete a registered key. 🔒 Protected.
 ## Proxy
 
 ### `POST /proxy/{provider}/{model}`
-Forward an AI request through the TokenWatch gateway. The gateway authenticates the user, enforces rate limits, decrypts the provider key in-memory, forwards the request, logs usage, and returns the provider's response unmodified. 🔒 Protected.
+Forward an AI request through the TokenGauge gateway. The gateway authenticates the user, enforces rate limits, decrypts the provider key in-memory, forwards the request, logs usage, and returns the provider's response unmodified. 🔒 Protected.
 
 **Path params**
 - `provider` — `anthropic` | `openai` | `google` | `mistral`
@@ -318,14 +318,14 @@ Register a webhook endpoint to receive usage events after every proxy request. �
 **Request**
 ```json
 {
-  "url": "https://my-app.com/hooks/tokenwatch"
+  "url": "https://my-app.com/hooks/tokengauge"
 }
 ```
 **Response `201`**
 ```json
 {
   "id": "...",
-  "url": "https://my-app.com/hooks/tokenwatch",
+  "url": "https://my-app.com/hooks/tokengauge",
   "created_at": "..."
 }
 ```

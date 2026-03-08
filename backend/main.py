@@ -14,7 +14,7 @@ async def lifespan(app: FastAPI):
     await disconnect_db()
 
 
-app = FastAPI(title="TokenWatch API", lifespan=lifespan)
+app = FastAPI(title="TokenGauge API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

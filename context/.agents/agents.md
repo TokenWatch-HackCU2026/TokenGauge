@@ -1,4 +1,4 @@
-# TokenWatch — Agent Definitions
+# TokenGauge — Agent Definitions
 
 Agents are specialized AI assistant configurations used during development. Each agent has a focused role, relevant context, and specific instructions.
 
@@ -14,7 +14,7 @@ Agents are specialized AI assistant configurations used during development. Each
 - `context/tools/tools.md`
 
 **Instructions**:
-- You are building the TokenWatch proxy server in Node.js + Express (TypeScript).
+- You are building the TokenGauge proxy server in Node.js + Express (TypeScript).
 - The proxy intercepts AI requests, authenticates users, decrypts their provider key via AWS KMS (in-memory only), forwards the request to the AI provider, logs usage to MongoDB, and enforces rate limits via Redis.
 - Raw API keys must NEVER be logged or persisted. Decrypt in-memory, use once, discard.
 - After forwarding, calculate token cost using the pricing table in requirements.md and log to `api_calls`.
@@ -31,7 +31,7 @@ Agents are specialized AI assistant configurations used during development. Each
 - `context/requirements/requirements.md` (FR-2)
 
 **Instructions**:
-- You are building the auth system for TokenWatch using JWT (access + refresh tokens).
+- You are building the auth system for TokenGauge using JWT (access + refresh tokens).
 - Access tokens expire in 15 minutes; refresh tokens in 7 days.
 - Passwords hashed with bcrypt (cost factor 12).
 - Users belong to organizations (multi-tenant). Include orgId in JWT payload.
@@ -49,7 +49,7 @@ Agents are specialized AI assistant configurations used during development. Each
 - `context/tools/tools.md` (AWS KMS section)
 
 **Instructions**:
-- You are building the API key vault for TokenWatch.
+- You are building the API key vault for TokenGauge.
 - When a user registers a key: encrypt with AWS KMS envelope encryption (AES-256 data key wrapped by CMK), store only `{ encryptedBlob, keyHint (last 4 chars), provider, userId }`.
 - When the proxy needs a key: retrieve blob, call KMS to decrypt data key, decrypt blob in memory, return raw key. Raw key never touches any storage layer.
 - Every decrypt call must be audit-logged to the `key_audit_log` collection: `{ userId, keyId, requestId, timestamp }`.
@@ -66,7 +66,7 @@ Agents are specialized AI assistant configurations used during development. Each
 - `context/requirements/requirements.md` (FR-4, FR-5)
 
 **Instructions**:
-- You are building the TokenWatch dashboard.
+- You are building the TokenGauge dashboard.
 - Backend: Express endpoints for usage queries with MongoDB aggregation pipelines. Support filters: dateRange, provider, model, appTag.
 - Cache dashboard query results in Redis with 60s TTL.
 - Frontend: Next.js + React + Tailwind CSS. Real-time charts (Recharts or Chart.js). Cost breakdown tables. Date range picker. Key management UI.
@@ -83,7 +83,7 @@ Agents are specialized AI assistant configurations used during development. Each
 - `context/requirements/requirements.md` (FR-7, FR-8, FR-9, FR-10)
 
 **Instructions**:
-- You are building the query classifier and model optimizer for TokenWatch.
+- You are building the query classifier and model optimizer for TokenGauge.
 - Classifier: at proxy time, analyze the prompt and produce `{ complexity: 1-10, type: "code"|"creative"|"analysis"|"chat"|"other" }`.
 - Optimizer: use complexity score to route to the cheapest capable model.
   - Complexity 1–3 → Haiku / Gemini Flash / GPT-4o-mini
@@ -104,7 +104,7 @@ Agents are specialized AI assistant configurations used during development. Each
 - `context/tools/tools.md` (Twilio, BullMQ sections)
 
 **Instructions**:
-- You are building the alerts and webhooks system for TokenWatch.
+- You are building the alerts and webhooks system for TokenGauge.
 - SMS alerts via Twilio: trigger at 80%/100% quota usage and on spike detection (2x 7-day baseline).
 - Spike detection: BullMQ scheduled job compares last 24h usage vs 7-day rolling average.
 - Webhooks: after every proxy request, enqueue a BullMQ job to POST to all user-registered endpoints. Retry up to 3 times with exponential backoff on failure. Log delivery attempts.

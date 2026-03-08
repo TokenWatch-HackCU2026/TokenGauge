@@ -15,7 +15,7 @@ from auth import hash_password
 from database import connect_db, disconnect_db
 from models import ApiCall, User
 
-TEST_EMAIL = "test@tokenwatch.dev"
+TEST_EMAIL = "test@tokengauge.dev"
 TEST_PASSWORD = "password123"
 
 _DEV_USER_ID_STR = "000000000000000000000001"

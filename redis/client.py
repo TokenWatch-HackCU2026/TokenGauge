@@ -1,7 +1,7 @@
 """
 redis/client.py
 ---------------
-aioredis connection singleton for TokenWatch.
+aioredis connection singleton for TokenGauge.
 
 Usage (FastAPI lifespan):
     from redis.client import connect_redis, disconnect_redis, get_redis

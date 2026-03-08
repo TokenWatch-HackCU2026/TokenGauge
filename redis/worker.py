@@ -1,7 +1,7 @@
 """
 redis/worker.py
 ---------------
-arq worker settings for TokenWatch async job queues.
+arq worker settings for TokenGauge async job queues.
 
 Queues:
     - "alerts"          — SMS alert delivery (Twilio, post-MVP)
