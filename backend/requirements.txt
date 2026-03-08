@@ -8,7 +8,8 @@ httpx
 bcrypt==4.3.0
 python-jose[cryptography]
 cryptography
-pymongo
+pymongo[srv]
+certifi
 redis[asyncio]
 aioredis
 arq

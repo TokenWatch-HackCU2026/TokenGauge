@@ -10,8 +10,10 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+import certifi
+
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-DB_NAME = os.getenv("DB_NAME", "tokenwatch")
+DB_NAME = os.getenv("DB_NAME", "tokengauge")
 
 _client: motor.motor_asyncio.AsyncIOMotorClient | None = None
 
@@ -27,6 +29,7 @@ async def connect_db() -> None:
             _client = motor.motor_asyncio.AsyncIOMotorClient(
                 MONGO_URI,
                 serverSelectionTimeoutMS=5000,
+                tlsCAFile=certifi.where(),
             )
             await _client.admin.command("ping")
             await init_beanie(
