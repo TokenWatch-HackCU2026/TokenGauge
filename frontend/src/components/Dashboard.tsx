@@ -93,6 +93,7 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
   const [page, setPage] = useState<Page>("overview");
   const [range, setRange] = useState<Range>("1W");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [filters, setFilters] = useState<{ provider: string; appTag: string; keyHint: string }>({ provider: "all", appTag: "all", keyHint: "all" });
   const params = rangeToParams(range);
   const gran = rangeToGranularity(range);
 
@@ -146,6 +147,41 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
     return () => { dead = true; clearTimeout(reconnectTimeout); ws.close(); };
   }, [queryClient]);
 
+  // ── Global client-side filtering ──────────────────────────────────────────
+  const filterOptions = useMemo(() => ({
+    providers: Array.from(new Set(records.map(r => r.provider))).sort(),
+    appTags: Array.from(new Set(records.map(r => r.app_tag).filter(Boolean) as string[])).sort(),
+    keyHints: Array.from(new Set(records.map(r => r.key_hint).filter(Boolean) as string[])).sort(),
+  }), [records]);
+
+  const filteredRecords = useMemo(() => {
+    let result = records;
+    if (filters.provider !== "all") result = result.filter(r => r.provider === filters.provider);
+    if (filters.appTag !== "all") result = result.filter(r => r.app_tag === filters.appTag);
+    if (filters.keyHint !== "all") result = result.filter(r => r.key_hint === filters.keyHint);
+    return result;
+  }, [records, filters]);
+
+  const hasActiveFilter = filters.provider !== "all" || filters.appTag !== "all" || filters.keyHint !== "all";
+
+  // Track last time records were refreshed + rolling "ago" label
+  const lastUpdatedRef = useRef<number>(Date.now());
+  const [agoText, setAgoText] = useState("just now");
+  useEffect(() => {
+    if (records.length > 0 || !isLoading) lastUpdatedRef.current = Date.now();
+  }, [records, isLoading]);
+  useEffect(() => {
+    const tick = () => {
+      const sec = Math.floor((Date.now() - lastUpdatedRef.current) / 1000);
+      if (sec < 5) setAgoText("just now");
+      else if (sec < 60) setAgoText(`${sec}s ago`);
+      else if (sec < 3600) setAgoText(`${Math.floor(sec / 60)}m ago`);
+      else setAgoText(`${Math.floor(sec / 3600)}h ago`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const sidebar = (
     <aside style={{
@@ -289,15 +325,33 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
                 </button>
               ))}
             </div>
-            {!mobile && <Pill color={isLive ? C.green : C.muted}>{isLive ? "● Live" : "○ Connecting…"}</Pill>}
+            {!mobile && (
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <Pill color={isLive ? C.green : C.muted}>{isLive ? "● Live" : "○ Connecting…"}</Pill>
+                <span style={{ fontSize: "0.72rem", color: C.muted, whiteSpace: "nowrap" }}>
+                  {agoText}
+                </span>
+              </div>
+            )}
           </div>
         </header>
 
+        {/* ── Filter bar ── */}
+        {page !== "settings" && (
+          <FilterBar
+            filters={filters}
+            onChange={setFilters}
+            options={filterOptions}
+            hasActive={hasActiveFilter}
+            mobile={mobile}
+          />
+        )}
+
         <div style={{ flex: 1, padding: mobile ? "1rem" : "1.75rem 2rem", overflow: "auto" }}>
           {page === "overview" && (
-            <OverviewPage summary={summary} records={records} dashSummary={dashSummary} loading={isLoading} gran={gran} range={range} mobile={mobile} />
+            <OverviewPage summary={summary} records={filteredRecords} dashSummary={dashSummary} loading={isLoading} gran={gran} range={range} mobile={mobile} />
           )}
-          {page === "usage" && <UsagePage summary={summary} records={records} loading={isLoading} mobile={mobile} />}
+          {page === "usage" && <UsagePage summary={summary} records={filteredRecords} loading={isLoading} mobile={mobile} />}
           {page === "settings" && <SettingsPage quota={quota} user={user} mobile={mobile} />}
         </div>
       </main>
@@ -725,6 +779,99 @@ const chartCardStyle: React.CSSProperties = {
 };
 const chartTitleStyle: React.CSSProperties = { fontWeight: 600, fontSize: "0.95rem" };
 
+// ─── Filter Bar ──────────────────────────────────────────────────────────────
+function FilterBar({ filters, onChange, options, hasActive, mobile }: {
+  filters: { provider: string; appTag: string; keyHint: string };
+  onChange: (f: { provider: string; appTag: string; keyHint: string }) => void;
+  options: { providers: string[]; appTags: string[]; keyHints: string[] };
+  hasActive: boolean;
+  mobile: boolean;
+}) {
+  const selectStyle: React.CSSProperties = {
+    background: C.bg, color: C.text, border: `1px solid ${C.border}`,
+    borderRadius: 6, padding: "0.35rem 0.5rem", fontSize: "0.78rem", cursor: "pointer",
+    minWidth: 0, maxWidth: mobile ? 120 : 160,
+  };
+  const labelStyle: React.CSSProperties = {
+    fontSize: "0.7rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.04em",
+  };
+
+  return (
+    <div style={{
+      padding: mobile ? "0.5rem 1rem" : "0.5rem 2rem",
+      borderBottom: `1px solid ${C.border}`,
+      background: C.surface,
+      display: "flex", alignItems: "center", gap: mobile ? "0.5rem" : "1rem",
+      flexWrap: "wrap",
+    }}>
+      <span style={{ ...labelStyle, flexShrink: 0 }}>Filters</span>
+
+      <FilterSelect
+        label="Provider"
+        value={filters.provider}
+        options={options.providers}
+        onChange={v => onChange({ ...filters, provider: v })}
+        style={selectStyle}
+      />
+      <FilterSelect
+        label="App Tag"
+        value={filters.appTag}
+        options={options.appTags}
+        onChange={v => onChange({ ...filters, appTag: v })}
+        style={selectStyle}
+      />
+      <FilterSelect
+        label="API Key"
+        value={filters.keyHint}
+        options={options.keyHints}
+        formatOption={v => `…${v}`}
+        onChange={v => onChange({ ...filters, keyHint: v })}
+        style={selectStyle}
+      />
+
+      {hasActive && (
+        <button
+          onClick={() => onChange({ provider: "all", appTag: "all", keyHint: "all" })}
+          style={{
+            background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6,
+            color: C.muted, fontSize: "0.75rem", padding: "0.3rem 0.6rem", cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          Clear all
+        </button>
+      )}
+    </div>
+  );
+}
+
+function FilterSelect({ label, value, options, onChange, style, formatOption }: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+  style: React.CSSProperties;
+  formatOption?: (v: string) => string;
+}) {
+  const isActive = value !== "all";
+  return (
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      aria-label={`Filter by ${label}`}
+      style={{
+        ...style,
+        ...(isActive ? { borderColor: C.accent, color: C.accentLight } : {}),
+      }}
+    >
+      <option value="all">All {label.toLowerCase()}s</option>
+      {options.map(o => (
+        <option key={o} value={o}>{formatOption ? formatOption(o) : o}</option>
+      ))}
+    </select>
+  );
+}
+
 // ─── Overview ─────────────────────────────────────────────────────────────────
 function OverviewPage({ summary, records, dashSummary, loading, gran, range, mobile }: {
   summary: ApiCallSummary[];
@@ -765,22 +912,38 @@ function OverviewPage({ summary, records, dashSummary, loading, gran, range, mob
 
 // ─── Usage ────────────────────────────────────────────────────────────────────
 function UsagePage({ summary, records, loading, mobile }: { summary: ApiCallSummary[]; records: ApiCall[]; loading: boolean; mobile: boolean }) {
-  const [filterProvider, setFilterProvider] = useState("all");
-  const providers = ["all", ...Array.from(new Set(records.map(r => r.provider)))];
-  const filtered = filterProvider === "all" ? records : records.filter(r => r.provider === filterProvider);
-
   return (
     <div>
       <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "repeat(3, 1fr)", gap: "1rem", marginBottom: "1.5rem" }}>
         {summary.map(s => (
-          <Card key={`${s.provider}-${s.model}`} title={s.model} subtitle={s.provider}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "0.5rem" }}>
-              <Metric label="Requests" value={fmtNum(s.request_count)} />
-              <Metric label="In tokens" value={fmtNum(s.total_tokens_in)} />
-              <Metric label="Out tokens" value={fmtNum(s.total_tokens_out)} />
-              <Metric label="Cost" value={fmtCost(s.total_cost_usd)} accent />
+          <div key={`${s.provider}-${s.model}`} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1rem 1.25rem" }}>
+            {/* Header */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: "0.9rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.model}</div>
+              </div>
+              <ProviderBadge provider={s.provider} small />
             </div>
-          </Card>
+            {/* Metrics 2x2 grid */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem 1rem" }}>
+              <div style={{ padding: "0.4rem 0", borderTop: `1px solid ${C.border}` }}>
+                <div style={{ color: C.muted, fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 2 }}>Requests</div>
+                <div style={{ fontWeight: 600, fontSize: "1rem" }}>{fmtNum(s.request_count)}</div>
+              </div>
+              <div style={{ padding: "0.4rem 0", borderTop: `1px solid ${C.border}` }}>
+                <div style={{ color: C.muted, fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 2 }}>Cost</div>
+                <div style={{ fontWeight: 600, fontSize: "1rem", color: C.accentLight }}>{fmtCost(s.total_cost_usd)}</div>
+              </div>
+              <div style={{ padding: "0.4rem 0", borderTop: `1px solid ${C.border}` }}>
+                <div style={{ color: C.muted, fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 2 }}>In tokens</div>
+                <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{fmtNum(s.total_tokens_in)}</div>
+              </div>
+              <div style={{ padding: "0.4rem 0", borderTop: `1px solid ${C.border}` }}>
+                <div style={{ color: C.muted, fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 2 }}>Out tokens</div>
+                <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{fmtNum(s.total_tokens_out)}</div>
+              </div>
+            </div>
+          </div>
         ))}
         {summary.length === 0 && !loading && (
           <div style={{ gridColumn: "1/-1" }}>
@@ -789,21 +952,8 @@ function UsagePage({ summary, records, loading, mobile }: { summary: ApiCallSumm
         )}
       </div>
 
-      <Card
-        title="All requests"
-        subtitle={`${filtered.length} records`}
-        action={
-          <select
-            value={filterProvider}
-            onChange={e => setFilterProvider(e.target.value)}
-            aria-label="Filter by provider"
-            style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.35rem 0.6rem", fontSize: "0.8rem", cursor: "pointer" }}
-          >
-            {providers.map(p => <option key={p} value={p}>{p === "all" ? "All providers" : p}</option>)}
-          </select>
-        }
-      >
-        <RequestsTable records={filtered} />
+      <Card title="All requests" subtitle={`${records.length} records`}>
+        <RequestsTable records={records} />
       </Card>
     </div>
   );
