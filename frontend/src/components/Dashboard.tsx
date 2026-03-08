@@ -1,16 +1,16 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, PieChart, Pie, Cell, Legend,
+  BarChart, Bar, XAxis, YAxis, Tooltip,
+  ResponsiveContainer,
 } from "recharts";
 import {
   fetchRecords, fetchSummary, fetchDashboardSummary,
-  fetchBreakdown, fetchQuota,
+  fetchQuota,
   fetchSdkToken, regenerateSdkToken, recalculateCosts, updatePhone,
-  ApiCall, ApiCallSummary, BreakdownRow, UserOut,
+  ApiCall, ApiCallSummary, UserOut,
 } from "../api/client";
-import { C, PROVIDER_COLORS, PIE_COLORS, LINE_COLORS, GaugeLogo } from "../theme";
+import { C, PROVIDER_COLORS, LINE_COLORS, GaugeLogo } from "../theme";
 
 // ─── SVG Icons ───────────────────────────────────────────────────────────────
 function IconMenu() {
@@ -106,10 +106,6 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
   const { data: dashSummary } = useQuery({
     queryKey: ["dashboard-summary", range],
     queryFn: () => fetchDashboardSummary(params),
-  });
-  const { data: breakdown = [] } = useQuery({
-    queryKey: ["breakdown", range],
-    queryFn: () => fetchBreakdown(params),
   });
   const { data: summary = [] } = useQuery({
     queryKey: ["summary"],
@@ -274,7 +270,7 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
 
         <div style={{ flex: 1, padding: mobile ? "1rem" : "1.75rem 2rem", overflow: "auto" }}>
           {page === "overview" && (
-            <OverviewPage summary={summary} records={records} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} gran={gran} range={range} mobile={mobile} />
+            <OverviewPage summary={summary} records={records} dashSummary={dashSummary} loading={isLoading} gran={gran} range={range} mobile={mobile} />
           )}
           {page === "usage" && <UsagePage summary={summary} records={records} loading={isLoading} mobile={mobile} />}
           {page === "settings" && <SettingsPage quota={quota} user={user} mobile={mobile} />}
@@ -390,209 +386,324 @@ function generateTimeline(range: Range, gran: Granularity): { sort: string; labe
   return timeline;
 }
 
-// ─── Model Usage Line Chart ──────────────────────────────────────────────────
-type UsageMetric = "cost" | "requests" | "tokens";
-
-// Custom SVG cursor: vertical line + floating pill that tracks the pointer
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function CrosshairCursor({ points, height, payload, fmtValue }: any) {
-  if (!points?.[0]) return null;
-  const x = points[0].x as number;
-  let total = 0;
-  if (payload) for (const p of payload) total += (p.value as number) ?? 0;
-  const label = payload?.[0]?.payload?.date ?? "";
-  const pillW = Math.max(90, label.length * 7 + 20);
-
-  return (
-    <g>
-      <line x1={x} y1={0} x2={x} y2={height} stroke={C.muted} strokeWidth={1} strokeDasharray="4 4" />
-      <foreignObject x={x - pillW / 2} y={-44} width={pillW} height={42} style={{ overflow: "visible", pointerEvents: "none" }}>
-        <div style={{
-          background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8,
-          padding: "3px 10px", textAlign: "center", whiteSpace: "nowrap",
-        }}>
-          <div style={{ fontSize: "0.82rem", fontWeight: 700, color: C.text }}>{fmtValue(total)}</div>
-          <div style={{ fontSize: "0.65rem", color: C.muted }}>{label}</div>
-        </div>
-      </foreignObject>
-    </g>
-  );
+// ─── Bar chart granularity (coarser than line charts) ────────────────────────
+function rangeToBarGranularity(range: Range): Granularity {
+  switch (range) {
+    case "live":  return "15min";
+    case "1D":    return "4hr";
+    case "1W":    return "1day";
+    case "1M":    return "1week";
+    case "3M":    return "1week";
+    case "YTD": case "1Y": return "1week";
+    case "ALL":   return "1week";
+  }
 }
 
-function ModelUsageChart({ records, gran, range }: { records: ApiCall[]; gran: Granularity; range: Range }) {
-  const [metric, setMetric] = useState<UsageMetric>("cost");
-  const [selected, setSelected] = useState<string | null>(null);
-  const [hover, setHover] = useState<{ date: string; values: Record<string, number>; total: number } | null>(null);
+const MAX_GROUPED_BINS = 20;
+const MAX_STACKED_BINS = 30;
 
-  // 1. Build full timeline with every bucket (memoized)
-  const timeline = useMemo(() => generateTimeline(range, gran), [range, gran]);
+// Build bar-chart-ready data from raw records
+function buildBarData(
+  records: ApiCall[],
+  range: Range,
+  metric: "cost" | "requests" | "tokens",
+  maxBins: number,
+): { data: Record<string, string | number>[]; models: string[] } {
+  const gran = rangeToBarGranularity(range);
+  const timeline = generateTimeline(range, gran);
 
-  // 2. Fill in record values
+  // Accumulate per-bucket per-model
   const filled: Record<string, Record<string, number>> = {};
   for (const { sort } of timeline) filled[sort] = {};
 
-  const models = new Set<string>();
+  const modelSet = new Set<string>();
   for (const r of records) {
     const { sort } = bucketInfo(r.timestamp, gran);
-    models.add(r.model);
-    if (!filled[sort]) filled[sort] = {}; // record outside timeline edge
+    modelSet.add(r.model);
+    if (!filled[sort]) filled[sort] = {};
     const val = metric === "cost" ? r.cost_usd : metric === "requests" ? 1 : r.tokens_in + r.tokens_out;
     filled[sort][r.model] = (filled[sort][r.model] ?? 0) + val;
   }
 
-  // 3. Build chart data — cumulative (running total) per model
-  const modelList = Array.from(models);
-  const cumulative: Record<string, number> = {};
-  for (const m of modelList) cumulative[m] = 0;
+  const models = Array.from(modelSet);
 
-  const data = timeline.map(({ sort, label }) => {
+  // Build rows from timeline
+  let rows = timeline.map(({ sort, label }) => {
     const row: Record<string, string | number> = { date: label };
-    for (const m of modelList) {
-      cumulative[m] += filled[sort]?.[m] ?? 0;
-      row[m] = cumulative[m];
-    }
+    for (const m of models) row[m] = filled[sort]?.[m] ?? 0;
     return row;
   });
 
-  // Total = final cumulative value (the rightmost point)
-  const totalValue = modelList.reduce((sum, m) => sum + cumulative[m], 0);
-
-  const fmtValue = useCallback(
-    (v: number) => metric === "cost" ? fmtCost(v) : fmtNum(v),
-    [metric],
-  );
-  const metricLabels: Record<UsageMetric, string> = { cost: "Total Spend", requests: "Total Requests", tokens: "Total Tokens" };
-
-  const toggleBtn = (label: string, val: UsageMetric) => (
-    <button
-      key={val}
-      onClick={() => setMetric(val)}
-      style={{ background: metric === val ? C.accent : C.border, color: metric === val ? C.onAccent : C.muted, border: "none", borderRadius: 6, padding: "0.25rem 0.65rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer" }}
-    >
-      {label}
-    </button>
-  );
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleMouseMove = useCallback((state: any) => {
-    if (state?.activePayload?.length) {
-      const payload = state.activePayload;
-      const date = state.activeLabel as string;
-      const values: Record<string, number> = {};
-      let total = 0;
-      for (const p of payload) {
-        values[p.dataKey as string] = p.value as number;
-        total += p.value as number;
+  // Merge adjacent bins if too many
+  if (rows.length > maxBins) {
+    const mergeN = Math.ceil(rows.length / maxBins);
+    const merged: typeof rows = [];
+    for (let i = 0; i < rows.length; i += mergeN) {
+      const chunk = rows.slice(i, i + mergeN);
+      const combined: Record<string, string | number> = {
+        date: chunk.length === 1
+          ? chunk[0].date
+          : `${chunk[0].date} – ${chunk[chunk.length - 1].date}`,
+      };
+      for (const m of models) {
+        combined[m] = chunk.reduce((s, r) => s + ((r[m] as number) ?? 0), 0);
       }
-      setHover({ date, values, total });
+      merged.push(combined);
     }
-  }, []);
+    rows = merged;
+  }
 
-  const handleMouseLeave = useCallback(() => setHover(null), []);
+  return { data: rows, models };
+}
 
+// Normalize rows to 100% per bucket
+function normalizeToPercent(
+  data: Record<string, string | number>[],
+  models: string[],
+): Record<string, string | number>[] {
+  return data.map(row => {
+    const total = models.reduce((s, m) => s + ((row[m] as number) ?? 0), 0);
+    const norm: Record<string, string | number> = { date: row.date };
+    for (const m of models) {
+      norm[m] = total > 0 ? ((row[m] as number) / total) * 100 : 0;
+    }
+    norm._total = total; // stash for tooltip
+    return norm;
+  });
+}
+
+// ─── Shared chart tooltip ────────────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function BarTooltip({ active, payload, label, fmtValue, showPercent, rawData }: any) {
+  if (!active || !payload?.length) return null;
   return (
-    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1.25rem 1.5rem" }}>
-      {/* Header: big value + date on hover */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.75rem" }}>
-        <div>
-          <div style={{ fontSize: "1.75rem", fontWeight: 700, letterSpacing: "-0.03em", lineHeight: 1.2 }}>
-            {fmtValue(hover ? hover.total : totalValue)}
-          </div>
-          <div style={{ color: C.muted, fontSize: "0.8rem", marginTop: 2 }}>
-            {hover ? hover.date : metricLabels[metric]}
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 4 }}>
-          {toggleBtn("Cost","cost")}{toggleBtn("Requests","requests")}{toggleBtn("Tokens","tokens")}
-        </div>
-      </div>
-
-      {/* Per-model breakdown on hover */}
-      {hover && modelList.length > 1 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem 1.25rem", marginBottom: "0.5rem" }}>
-          {modelList.filter(m => (hover.values[m] ?? 0) > 0).map((model) => (
-            <span key={model} style={{ fontSize: "0.78rem", color: C.subtle }}>
-              <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: LINE_COLORS[modelList.indexOf(model) % LINE_COLORS.length], marginRight: 5, verticalAlign: "middle" }} />
-              {model}: {fmtValue(hover.values[model] ?? 0)}
+    <div style={{
+      background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10,
+      padding: "0.6rem 0.85rem", boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+      minWidth: 140,
+    }}>
+      <div style={{ fontSize: "0.75rem", color: C.muted, marginBottom: 6 }}>{label}</div>
+      {payload
+        .filter((p: { value: number }) => p.value > 0)
+        .sort((a: { value: number }, b: { value: number }) => b.value - a.value)
+        .map((p: { dataKey: string; value: number; color: string }) => (
+          <div key={p.dataKey} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: p.color, flexShrink: 0 }} />
+            <span style={{ flex: 1, fontSize: "0.78rem", color: C.subtle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.dataKey}</span>
+            <span style={{ fontSize: "0.78rem", fontWeight: 600, color: C.text, whiteSpace: "nowrap" }}>
+              {showPercent ? `${p.value.toFixed(1)}%` : fmtValue(p.value)}
             </span>
-          ))}
-        </div>
-      )}
-
-      {data.length === 0 ? <EmptyState label="No data for this period" /> : (
-        <>
-          {/* top margin makes room for the floating pill above the crosshair */}
-          <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={data} onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave} margin={{ top: 48, right: 8, bottom: 0, left: 8 }}>
-              <XAxis dataKey="date" hide />
-              <YAxis hide />
-              <Tooltip
-                content={<span />}
-                cursor={<CrosshairCursor fmtValue={fmtValue} />}
-                isAnimationActive={false}
-              />
-              {modelList.map((model, i) => (
-                <Line
-                  key={model}
-                  type="monotone"
-                  dataKey={model}
-                  stroke={LINE_COLORS[i % LINE_COLORS.length]}
-                  strokeWidth={selected === null || selected === model ? 2.5 : 1}
-                  strokeOpacity={selected === null || selected === model ? 1 : 0.15}
-                  dot={false}
-                  activeDot={selected === null || selected === model ? { r: 4, fill: LINE_COLORS[i % LINE_COLORS.length], stroke: C.surface, strokeWidth: 2 } : false}
-                  name={model}
-                  isAnimationActive={false}
-                />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-
-          {/* Model legend */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem 0.75rem", marginTop: "0.5rem" }}>
-            {modelList.map((model, i) => (
-              <button key={model} onClick={() => setSelected(selected === model ? null : model)} style={{ background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, padding: "2px 4px", borderRadius: 4, opacity: selected === null || selected === model ? 1 : 0.35 }}>
-                <span style={{ width: 10, height: 10, borderRadius: "50%", background: LINE_COLORS[i % LINE_COLORS.length], display: "inline-block", flexShrink: 0 }} />
-                <span style={{ fontSize: "0.78rem", color: C.subtle }}>{model}</span>
-              </button>
-            ))}
           </div>
-        </>
+        ))}
+      {showPercent && rawData && (
+        <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 4, paddingTop: 4, fontSize: "0.72rem", color: C.muted }}>
+          Total: {fmtNum(rawData._total ?? 0)} tokens
+        </div>
       )}
     </div>
   );
 }
 
-// ─── Cost breakdown pie ────────────────────────────────────────────────────────
-function CostPieChart({ breakdown, mobile }: { breakdown: BreakdownRow[]; mobile?: boolean }) {
-  const pieData = Object.entries(
-    breakdown.reduce<Record<string, number>>((acc, r) => { acc[r.model] = (acc[r.model] ?? 0) + r.cost_usd; return acc; }, {})
-  ).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-
+// ─── Shared chart legend ────────────────────────────────────────────────────
+function ChartLegend({ models, selected, onSelect, totals, fmtValue }: {
+  models: string[];
+  selected: string | null;
+  onSelect: (m: string | null) => void;
+  totals?: Record<string, number>;
+  fmtValue?: (v: number) => string;
+}) {
   return (
-    <Card title="Cost by model" subtitle="% share">
-      {pieData.length > 0 ? (
-        <ResponsiveContainer width="100%" height={mobile ? 220 : 260}>
-          <PieChart>
-            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={mobile ? 40 : 55} outerRadius={mobile ? 65 : 85} paddingAngle={3}>
-              {pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-            </Pie>
-            <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} formatter={(v: number) => [fmtCost(v), "Cost"]} />
-            <Legend iconType="circle" iconSize={8} formatter={v => <span style={{ color: C.subtle, fontSize: 12 }}>{v}</span>} />
-          </PieChart>
-        </ResponsiveContainer>
-      ) : (
-        <EmptyState label="No data yet" />
-      )}
-    </Card>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem 0.6rem", marginTop: "0.6rem" }}>
+      {models.map((model, i) => {
+        const active = selected === null || selected === model;
+        return (
+          <button
+            key={model}
+            onClick={() => onSelect(selected === model ? null : model)}
+            style={{
+              background: active ? `${LINE_COLORS[i % LINE_COLORS.length]}18` : "transparent",
+              border: `1px solid ${active ? `${LINE_COLORS[i % LINE_COLORS.length]}40` : "transparent"}`,
+              borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center",
+              gap: 5, padding: "3px 8px",
+              opacity: active ? 1 : 0.35, transition: "all 0.15s",
+            }}
+          >
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: LINE_COLORS[i % LINE_COLORS.length], flexShrink: 0 }} />
+            <span style={{ fontSize: "0.75rem", color: C.subtle, whiteSpace: "nowrap" }}>{model}</span>
+            {totals && fmtValue && (
+              <span style={{ fontSize: "0.72rem", fontWeight: 600, color: C.text, marginLeft: 2 }}>{fmtValue(totals[model] ?? 0)}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
+// ─── Cost Bar Chart (grouped) ───────────────────────────────────────────────
+function CostBarChart({ records, range, mobile }: { records: ApiCall[]; range: Range; mobile: boolean }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const { data, models } = useMemo(() => buildBarData(records, range, "cost", MAX_GROUPED_BINS), [records, range]);
+  const totals = useMemo(() => {
+    const t: Record<string, number> = {};
+    for (const m of models) t[m] = data.reduce((s, r) => s + ((r[m] as number) ?? 0), 0);
+    return t;
+  }, [data, models]);
+  const grandTotal = Object.values(totals).reduce((s, v) => s + v, 0);
+
+  if (data.length === 0 || models.length === 0) {
+    return (
+      <div style={chartCardStyle}>
+        <div style={chartTitleStyle}>Cost by Model</div>
+        <EmptyState label="No cost data for this period" />
+      </div>
+    );
+  }
+
+  return (
+    <div style={chartCardStyle}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.5rem" }}>
+        <div>
+          <div style={chartTitleStyle}>Cost by Model</div>
+          <div style={{ color: C.muted, fontSize: "0.78rem" }}>Total: {fmtCost(grandTotal)}</div>
+        </div>
+      </div>
+      <ResponsiveContainer width="100%" height={mobile ? 220 : 260}>
+        <BarChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 4 }} barCategoryGap="20%" barGap={1}>
+          <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+          <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} width={50} />
+          <Tooltip content={<BarTooltip fmtValue={fmtCost} />} cursor={{ fill: `${C.muted}15` }} />
+          {models.map((model, i) => (
+            <Bar
+              key={model}
+              dataKey={model}
+              fill={LINE_COLORS[i % LINE_COLORS.length]}
+              radius={[3, 3, 0, 0]}
+              opacity={selected === null || selected === model ? 1 : 0.15}
+              isAnimationActive={false}
+            />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+      <ChartLegend models={models} selected={selected} onSelect={setSelected} totals={totals} fmtValue={fmtCost} />
+    </div>
+  );
+}
+
+// ─── Requests Bar Chart (grouped) ───────────────────────────────────────────
+function RequestsBarChart({ records, range, mobile }: { records: ApiCall[]; range: Range; mobile: boolean }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const { data, models } = useMemo(() => buildBarData(records, range, "requests", MAX_GROUPED_BINS), [records, range]);
+  const totals = useMemo(() => {
+    const t: Record<string, number> = {};
+    for (const m of models) t[m] = data.reduce((s, r) => s + ((r[m] as number) ?? 0), 0);
+    return t;
+  }, [data, models]);
+  const grandTotal = Object.values(totals).reduce((s, v) => s + v, 0);
+
+  if (data.length === 0 || models.length === 0) {
+    return (
+      <div style={chartCardStyle}>
+        <div style={chartTitleStyle}>Requests by Model</div>
+        <EmptyState label="No request data for this period" />
+      </div>
+    );
+  }
+
+  return (
+    <div style={chartCardStyle}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.5rem" }}>
+        <div>
+          <div style={chartTitleStyle}>Requests by Model</div>
+          <div style={{ color: C.muted, fontSize: "0.78rem" }}>Total: {fmtNum(grandTotal)}</div>
+        </div>
+      </div>
+      <ResponsiveContainer width="100%" height={mobile ? 220 : 260}>
+        <BarChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 4 }} barCategoryGap="20%" barGap={1}>
+          <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+          <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtNum(v)} width={40} />
+          <Tooltip content={<BarTooltip fmtValue={fmtNum} />} cursor={{ fill: `${C.muted}15` }} />
+          {models.map((model, i) => (
+            <Bar
+              key={model}
+              dataKey={model}
+              fill={LINE_COLORS[i % LINE_COLORS.length]}
+              radius={[3, 3, 0, 0]}
+              opacity={selected === null || selected === model ? 1 : 0.15}
+              isAnimationActive={false}
+            />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+      <ChartLegend models={models} selected={selected} onSelect={setSelected} totals={totals} fmtValue={fmtNum} />
+    </div>
+  );
+}
+
+// ─── Tokens 100% Stacked Bar Chart ──────────────────────────────────────────
+function TokensStackedChart({ records, range, mobile }: { records: ApiCall[]; range: Range; mobile: boolean }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const { data: rawData, models } = useMemo(() => buildBarData(records, range, "tokens", MAX_STACKED_BINS), [records, range]);
+  const normData = useMemo(() => normalizeToPercent(rawData, models), [rawData, models]);
+
+  // Per-model total tokens for legend
+  const totals = useMemo(() => {
+    const t: Record<string, number> = {};
+    for (const m of models) t[m] = rawData.reduce((s, r) => s + ((r[m] as number) ?? 0), 0);
+    return t;
+  }, [rawData, models]);
+
+  if (rawData.length === 0 || models.length === 0) {
+    return (
+      <div style={chartCardStyle}>
+        <div style={chartTitleStyle}>Token Usage Share</div>
+        <EmptyState label="No token data for this period" />
+      </div>
+    );
+  }
+
+  return (
+    <div style={chartCardStyle}>
+      <div style={{ marginBottom: "0.5rem" }}>
+        <div style={chartTitleStyle}>Token Usage Share</div>
+        <div style={{ color: C.muted, fontSize: "0.78rem" }}>Relative proportion per time bucket (100% normalized)</div>
+      </div>
+      <ResponsiveContainer width="100%" height={mobile ? 240 : 280}>
+        <BarChart data={normData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }} barCategoryGap="12%">
+          <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+          <YAxis domain={[0, 100]} tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `${v}%`} width={40} />
+          <Tooltip
+            content={(props: any) => (
+              <BarTooltip {...props} fmtValue={fmtNum} showPercent rawData={normData.find(r => r.date === props?.label)} />
+            )}
+            cursor={{ fill: `${C.muted}15` }}
+          />
+          {models.map((model, i) => (
+            <Bar
+              key={model}
+              dataKey={model}
+              stackId="tokens"
+              fill={LINE_COLORS[i % LINE_COLORS.length]}
+              opacity={selected === null || selected === model ? 1 : 0.15}
+              isAnimationActive={false}
+            />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+      <ChartLegend models={models} selected={selected} onSelect={setSelected} totals={totals} fmtValue={fmtNum} />
+    </div>
+  );
+}
+
+const chartCardStyle: React.CSSProperties = {
+  background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1.25rem 1.5rem",
+};
+const chartTitleStyle: React.CSSProperties = { fontWeight: 600, fontSize: "0.95rem" };
+
 // ─── Overview ─────────────────────────────────────────────────────────────────
-function OverviewPage({ summary, records, breakdown, dashSummary, loading, gran, range, mobile }: {
+function OverviewPage({ summary, records, dashSummary, loading, gran, range, mobile }: {
   summary: ApiCallSummary[];
   records: ApiCall[];
-  breakdown: BreakdownRow[];
   dashSummary: { total_tokens_in: number; total_tokens_out: number; total_cost_usd: number; request_count: number; avg_latency_ms: number } | undefined;
   loading: boolean;
   gran: Granularity;
@@ -601,6 +712,7 @@ function OverviewPage({ summary, records, breakdown, dashSummary, loading, gran,
 }) {
   return (
     <div>
+      {/* KPI cards */}
       <div style={{ display: "grid", gridTemplateColumns: mobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: "0.75rem", marginBottom: "1.25rem" }}>
         <KpiCard label="Total Spend" value={loading ? "—" : fmtCost(dashSummary?.total_cost_usd ?? 0)} />
         <KpiCard label="Total Tokens" value={loading ? "—" : fmtNum((dashSummary?.total_tokens_in ?? 0) + (dashSummary?.total_tokens_out ?? 0))} />
@@ -608,9 +720,15 @@ function OverviewPage({ summary, records, breakdown, dashSummary, loading, gran,
         <KpiCard label="Avg Latency" value={loading ? "—" : `${(dashSummary?.avg_latency_ms ?? 0).toFixed(0)}ms`} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "2fr 1fr", gap: "1rem", marginBottom: "1.25rem" }}>
-        <ModelUsageChart records={records} gran={gran} range={range} />
-        <CostPieChart breakdown={breakdown} mobile={mobile} />
+      {/* Cost + Requests side by side on desktop */}
+      <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
+        <CostBarChart records={records} range={range} mobile={mobile} />
+        <RequestsBarChart records={records} range={range} mobile={mobile} />
+      </div>
+
+      {/* Token share — full width */}
+      <div style={{ marginBottom: "1.25rem" }}>
+        <TokensStackedChart records={records} range={range} mobile={mobile} />
       </div>
 
       <Card title="Recent requests" subtitle={`${records.length} total`}>
