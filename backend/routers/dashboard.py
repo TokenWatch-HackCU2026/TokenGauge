@@ -51,7 +51,10 @@ class QuotaOut(BaseModel):
     remaining: int
     reset_at: int   # unix ms
     window_ms: int
-
+class CostStats(BaseModel):
+    mean: float
+    std_dev: float
+    count: int
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -220,3 +223,20 @@ async def get_quota(current_user: dict = Depends(get_current_user)):
         reset_at=now_ms + QUOTA_WINDOW_MS,
         window_ms=QUOTA_WINDOW_MS,
     )
+@router.get("/cost-stats", response_model=CostStats)
+async def get_cost_stats(current_user: dict = Depends(get_current_user)):
+    uid = ObjectId(current_user["user_id"])
+    pipeline = [
+        {"$match": {"user_id": uid, "cost_usd": {"$gt": 0}}},
+        {"$group": {
+            "_id": None,
+            "mean": {"$avg": "$cost_usd"},
+            "std_dev": {"$stdDevPop": "$cost_usd"},
+            "count": {"$sum": 1},
+        }},
+    ]
+    rows = await get_db()["api_calls"].aggregate(pipeline).to_list(None)
+    if not rows or rows[0]["count"] < 2:
+        return CostStats(mean=0.0, std_dev=0.0, count=rows[0]["count"] if rows else 0)
+    r = rows[0]
+    return CostStats(mean=r["mean"], std_dev=r["std_dev"] or 0.0, count=r["count"])
