@@ -73,7 +73,7 @@ _live_queues: dict[str, asyncio.Queue] = {}
 @router.post("/", response_model=ApiCallOut)
 async def log_usage(record: ApiCallCreate, current_user: dict = Depends(get_current_user)):
     uid = PydanticObjectId(current_user["user_id"])
-    data = record.model_dump()
+    data = {k: v for k, v in record.model_dump().items() if v is not None}
     if not data.get("cost_usd"):
         data["cost_usd"] = _calc_cost(data["model"], data.get("tokens_in", 0), data.get("tokens_out", 0))
     doc = ApiCall(user_id=uid, **data)
@@ -83,6 +83,28 @@ async def log_usage(record: ApiCallCreate, current_user: dict = Depends(get_curr
     uid_str = str(uid)
     if uid_str in _live_queues:
         await _live_queues[uid_str].put(out)
+
+    # Track quota in Redis and check SMS alert thresholds
+    async def _quota_and_alerts():
+        try:
+            from datetime import timezone as _tz
+            from redis_client import get_redis
+            r = await get_redis()
+            if r is None:
+                return
+            total_tokens = data.get("tokens_in", 0) + data.get("tokens_out", 0)
+            if total_tokens > 0:
+                today = datetime.now(_tz.utc).strftime("%Y-%m-%d")
+                quota_key = f"quota:{current_user['user_id']}:{today}"
+                await r.incrby(quota_key, total_tokens)
+                await r.expire(quota_key, 86400)
+            from alerts import check_quota_alerts
+            await check_quota_alerts(current_user["user_id"])
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Quota/alert check failed: %s", exc)
+    asyncio.create_task(_quota_and_alerts())
+
     return out
 
 

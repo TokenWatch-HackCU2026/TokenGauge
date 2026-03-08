@@ -218,6 +218,22 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
         ))}
       </nav>
 
+      <a
+        href="https://pypi.org/project/tokengauge/"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          display: "flex", alignItems: "center", gap: "0.6rem",
+          padding: "0.5rem 1.25rem", color: C.muted, fontSize: "0.8rem",
+          textDecoration: "none", transition: "color 0.15s",
+        }}
+        onMouseEnter={e => (e.currentTarget.style.color = C.accentLight)}
+        onMouseLeave={e => (e.currentTarget.style.color = C.muted)}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        Documentation
+      </a>
+
       <div style={{ padding: "1rem 1.25rem", borderTop: `1px solid ${C.border}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: onLogout ? "0.6rem" : 0 }}>
           <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.85rem", fontWeight: 700, flexShrink: 0 }}>
@@ -809,21 +825,50 @@ function linReg(xs: number[], ys: number[]): { slope: number; intercept: number 
   return { slope, intercept: my - slope * mx };
 }
 
-function buildDailyBuckets(records: ApiCall[], windowDays: number) {
-  const now = new Date();
-  const cutoff = new Date(now.getTime() - windowDays * 86_400_000);
-  const byDay: Record<string, number> = {};
+function buildForecastBuckets(records: ApiCall[], range: Range) {
+  const gran = rangeToBarGranularity(range);
+  const timeline = generateTimeline(range, gran);
+
+  // Accumulate cost per bucket
+  const filled: Record<string, number> = {};
+  for (const { sort } of timeline) filled[sort] = 0;
   for (const r of records) {
-    const d = parseTimestamp(r.timestamp);
-    if (d < cutoff) continue;
-    const key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-    byDay[key] = (byDay[key] ?? 0) + r.cost_usd;
+    const { sort } = bucketInfo(r.timestamp, gran);
+    if (sort in filled) filled[sort] = (filled[sort] ?? 0) + r.cost_usd;
   }
-  return Array.from({ length: windowDays + 1 }, (_, i) => {
-    const d = new Date(now.getTime() - (windowDays - i) * 86_400_000);
-    const key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-    return { label: `${d.getMonth() + 1}/${d.getDate()}`, dayIndex: i, actual: byDay[key] ?? 0 };
-  });
+
+  return timeline.map(({ sort, label }, i) => ({
+    label, bucketIndex: i, actual: filled[sort] ?? 0,
+  }));
+}
+
+// How many forecast bins to add (roughly half the history length, capped)
+function forecastBinCount(range: Range): number {
+  switch (range) {
+    case "live": return 4;
+    case "1D":   return 3;
+    case "1W":   return 7;
+    case "1M":   return 7;
+    case "3M":   return 4;
+    case "YTD": case "1Y": return 3;
+    case "ALL":  return 3;
+  }
+}
+
+// Advance a date by one granularity step and return the label
+function advanceBucket(cursor: Date, gran: Granularity): string {
+  switch (gran) {
+    case "15s":  cursor.setSeconds(cursor.getSeconds() + 15); break;
+    case "15min": cursor.setMinutes(cursor.getMinutes() + 15); break;
+    case "1hr":  cursor.setHours(cursor.getHours() + 1); break;
+    case "4hr":  cursor.setHours(cursor.getHours() + 4); break;
+    case "12hr": cursor.setHours(cursor.getHours() + 12); break;
+    case "1day": cursor.setDate(cursor.getDate() + 1); break;
+    case "2day": cursor.setDate(cursor.getDate() + 2); break;
+    case "1week": cursor.setDate(cursor.getDate() + 7); break;
+    case "1month": cursor.setMonth(cursor.getMonth() + 1); break;
+  }
+  return bucketInfoFromDate(cursor, gran).label;
 }
 
 // ─── Forecast Tooltip ────────────────────────────────────────────────────────
@@ -833,22 +878,27 @@ function ForecastTooltip({ active, payload, label }: any) {
   const pt = payload[0]?.payload;
   const trend = pt?.histTrend ?? pt?.forecastTrend;
   return (
-    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: "0.6rem 0.85rem", boxShadow: "0 4px 20px rgba(0,0,0,0.4)" }}>
+    <div style={{
+      background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10,
+      padding: "0.6rem 0.85rem", boxShadow: "0 4px 20px rgba(0,0,0,0.4)", minWidth: 140,
+    }}>
       <div style={{ fontSize: "0.75rem", color: C.muted, marginBottom: 6 }}>{label}{pt?.isForecast ? " (forecast)" : ""}</div>
       {pt?.actual !== undefined && (
-        <div style={{ fontSize: "0.82rem", marginBottom: 3 }}>
-          <span style={{ color: C.muted }}>Actual: </span>
-          <span style={{ fontWeight: 600 }}>{fmtCost(pt.actual)}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+          <span style={{ width: 8, height: 8, borderRadius: 2, background: C.accent, opacity: 0.85, flexShrink: 0 }} />
+          <span style={{ flex: 1, fontSize: "0.78rem", color: C.subtle }}>Actual</span>
+          <span style={{ fontSize: "0.78rem", fontWeight: 600, color: C.text }}>{fmtCost(pt.actual)}</span>
         </div>
       )}
       {trend !== undefined && (
-        <div style={{ fontSize: "0.82rem", marginBottom: pt?.isForecast ? 3 : 0 }}>
-          <span style={{ color: C.muted }}>{pt?.isForecast ? "Forecast: " : "Trend: "}</span>
-          <span style={{ fontWeight: 600, color: C.accentLight }}>{fmtCost(trend)}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: pt?.isForecast ? 3 : 0 }}>
+          <span style={{ width: 8, height: 8, borderRadius: 2, background: C.accentLight, flexShrink: 0 }} />
+          <span style={{ flex: 1, fontSize: "0.78rem", color: C.subtle }}>{pt?.isForecast ? "Forecast" : "Trend"}</span>
+          <span style={{ fontSize: "0.78rem", fontWeight: 600, color: C.text }}>{fmtCost(trend)}</span>
         </div>
       )}
       {pt?.isForecast && pt?.lower !== undefined && (
-        <div style={{ fontSize: "0.78rem", color: C.muted }}>
+        <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 4, paddingTop: 4, fontSize: "0.72rem", color: C.muted }}>
           95% CI: {fmtCost(pt.lower)} – {fmtCost(pt.lower + pt.bandWidth)}
         </div>
       )}
@@ -857,14 +907,13 @@ function ForecastTooltip({ active, payload, label }: any) {
 }
 
 // ─── Cost Forecast Chart ──────────────────────────────────────────────────────
-function CostForecastChart({ records, mobile }: { records: ApiCall[]; mobile: boolean }) {
-  const HISTORY_DAYS = 14;
-  const FORECAST_DAYS = 7;
+function CostForecastChart({ records, range, mobile }: { records: ApiCall[]; range: Range; mobile: boolean }) {
   const Z = 1.96; // 95% CI
+  const FORECAST_BINS = forecastBinCount(range);
 
   const { chartData, forecastTotal } = useMemo(() => {
-    const historical = buildDailyBuckets(records, HISTORY_DAYS);
-    const xs = historical.map(d => d.dayIndex);
+    const historical = buildForecastBuckets(records, range);
+    const xs = historical.map(d => d.bucketIndex);
     const ys = historical.map(d => d.actual);
     const { slope, intercept } = linReg(xs, ys);
 
@@ -886,32 +935,34 @@ function CostForecastChart({ records, mobile }: { records: ApiCall[]; mobile: bo
       histTrend?: number; forecastTrend?: number;
       lower?: number; bandWidth?: number; isForecast: boolean;
     }[] = historical.map(d => {
-      const { y } = predict(d.dayIndex);
+      const { y } = predict(d.bucketIndex);
       return { label: d.label, actual: d.actual, histTrend: y, isForecast: false };
     });
 
     // Boundary point: last historical also starts forecast line
-    const lastXi = HISTORY_DAYS;
+    const lastXi = historical.length - 1;
     const { y: boundaryY } = predict(lastXi);
     data[data.length - 1].forecastTrend = boundaryY;
 
+    // Generate forecast bins
+    const gran = rangeToBarGranularity(range);
+    const cursor = new Date();
     let total = 0;
-    for (let i = 1; i <= FORECAST_DAYS; i++) {
-      const xi = HISTORY_DAYS + i;
-      const d = new Date(Date.now() + i * 86_400_000);
-      const label = `${d.getMonth() + 1}/${d.getDate()}`;
+    for (let i = 1; i <= FORECAST_BINS; i++) {
+      const xi = historical.length - 1 + i;
+      const label = advanceBucket(cursor, gran);
       const { y, lower, upper } = predict(xi);
       total += y;
       data.push({ label, forecastTrend: y, lower, bandWidth: upper - lower, isForecast: true });
     }
 
     return { chartData: data, forecastTotal: total };
-  }, [records]);
+  }, [records, range]);
 
   if (records.length < 3) {
     return (
       <div style={chartCardStyle}>
-        <div style={chartTitleStyle}>7-Day Cost Forecast</div>
+        <div style={chartTitleStyle}>Cost Forecast</div>
         <EmptyState label="Need at least 3 records to generate a forecast" />
       </div>
     );
@@ -921,24 +972,24 @@ function CostForecastChart({ records, mobile }: { records: ApiCall[]; mobile: bo
     <div style={chartCardStyle}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.5rem" }}>
         <div>
-          <div style={chartTitleStyle}>7-Day Cost Forecast</div>
-          <div style={{ color: C.muted, fontSize: "0.78rem" }}>Linear trend on last 14 days · 95% confidence band</div>
+          <div style={chartTitleStyle}>Cost Forecast</div>
+          <div style={{ color: C.muted, fontSize: "0.78rem" }}>Linear trend · 95% confidence band</div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: "0.75rem", color: C.muted }}>Projected 7-day spend</div>
+          <div style={{ fontSize: "0.75rem", color: C.muted }}>Projected spend ({FORECAST_BINS} bins)</div>
           <div style={{ fontWeight: 700, fontSize: "1.1rem", color: C.accentLight }}>{fmtCost(forecastTotal)}</div>
         </div>
       </div>
       <ResponsiveContainer width="100%" height={mobile ? 220 : 260}>
         <ComposedChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
           <XAxis dataKey="label" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-          <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtCost} width={54} />
-          <Tooltip content={<ForecastTooltip />} cursor={{ fill: `${C.muted}10` }} />
+          <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtCost} width={50} />
+          <Tooltip content={<ForecastTooltip />} cursor={{ fill: `${C.muted}15` }} />
           {/* Confidence band using stacked area trick */}
           <Area dataKey="lower" stackId="band" stroke="none" fill="transparent" isAnimationActive={false} legendType="none" />
           <Area dataKey="bandWidth" stackId="band" stroke="none" fill={C.accent} fillOpacity={0.13} isAnimationActive={false} legendType="none" />
           {/* Actual daily cost bars */}
-          <Bar dataKey="actual" fill={C.accent} fillOpacity={0.65} radius={[3, 3, 0, 0]} isAnimationActive={false} />
+          <Bar dataKey="actual" fill={C.accent} fillOpacity={0.85} radius={[3, 3, 0, 0]} isAnimationActive={false} />
           {/* Solid trend line over historical */}
           <Line dataKey="histTrend" stroke={C.accentLight} strokeWidth={2} dot={false} isAnimationActive={false} legendType="none" connectNulls />
           {/* Dashed forecast line */}
@@ -947,7 +998,7 @@ function CostForecastChart({ records, mobile }: { records: ApiCall[]; mobile: bo
       </ResponsiveContainer>
       <div style={{ display: "flex", gap: "1rem", marginTop: "0.5rem", fontSize: "0.75rem", color: C.muted, flexWrap: "wrap" }}>
         <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <span style={{ width: 10, height: 10, background: C.accent, borderRadius: 2, opacity: 0.65, flexShrink: 0 }} />
+          <span style={{ width: 10, height: 10, background: C.accent, borderRadius: 2, opacity: 0.85, flexShrink: 0 }} />
           Actual daily cost
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -1138,7 +1189,7 @@ function OverviewPage({ summary, records, dashSummary, loading, gran, range, mob
 
       {/* Cost forecast — full width */}
       <div style={{ marginBottom: "1.25rem" }}>
-        <CostForecastChart records={records} mobile={mobile} />
+        <CostForecastChart records={records} range={range} mobile={mobile} />
       </div>
 
       <Card title="Recent requests" subtitle={`${records.length} total`}>
