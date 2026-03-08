@@ -170,7 +170,7 @@ async def live_usage(websocket: WebSocket, token: str):
                 new_docs = (
                     await ApiCall.find(
                         ApiCall.user_id == uid,
-                        ApiCall.timestamp > last_seen,
+                        {"timestamp": {"$gt": last_seen}},
                     )
                     .sort(-ApiCall.timestamp)
                     .to_list()
