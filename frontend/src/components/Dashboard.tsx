@@ -8,7 +8,8 @@ import {
   fetchRecords, fetchSummary, fetchDashboardSummary,
   fetchQuota,
   fetchSdkToken, regenerateSdkToken, recalculateCosts, updatePhone,
-  ApiCall, ApiCallSummary, BreakdownRow, UserOut,
+  fetchSpendLimits, updateSpendLimits, fetchSpendStatus,
+  ApiCall, ApiCallSummary, BreakdownRow, UserOut, ProviderSpendStatus,
 } from "../api/client";
 import { C, PROVIDER_COLORS, PIE_COLORS, LINE_COLORS, GaugeLogo } from "../theme";
 import { saveCache, loadCache } from "../api/cache";
@@ -1250,6 +1251,126 @@ function UsagePage({ summary, records, loading, mobile }: { summary: ApiCallSumm
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 
+// ─── Spend Limits Card ────────────────────────────────────────────────────────
+
+type Period = "daily" | "weekly" | "monthly";
+type ProvKey = "openai" | "anthropic" | "google";
+interface LimitDraft { enabled: boolean; limit_usd: string; period: Period }
+
+const PROV_CONFIG: { key: ProvKey; label: string; color: string }[] = [
+  { key: "openai",    label: "OpenAI",    color: "#74aa9c" },
+  { key: "anthropic", label: "Anthropic", color: "#d97706" },
+  { key: "google",    label: "Google",    color: "#4285f4" },
+];
+
+const DEFAULT_DRAFT: LimitDraft = { enabled: false, limit_usd: "10.00", period: "monthly" };
+
+function SpendLimitsCard() {
+  const [drafts, setDrafts] = useState<Record<ProvKey, LimitDraft>>({
+    openai: { ...DEFAULT_DRAFT },
+    anthropic: { ...DEFAULT_DRAFT },
+    google: { ...DEFAULT_DRAFT },
+  });
+  const [status, setStatus] = useState<ProviderSpendStatus[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchSpendLimits().then(limits => {
+      setDrafts(prev => {
+        const next = { ...prev };
+        for (const k of ["openai", "anthropic", "google"] as ProvKey[]) {
+          const lim = (limits as Record<string, { limit_usd: number; period: Period; enabled: boolean } | undefined>)[k];
+          if (lim) next[k] = { enabled: lim.enabled, limit_usd: String(lim.limit_usd), period: lim.period };
+        }
+        return next;
+      });
+    }).catch(() => {});
+    fetchSpendStatus().then(s => setStatus(s.statuses)).catch(() => {});
+  }, []);
+
+  function update(prov: ProvKey, field: keyof LimitDraft, value: string | boolean | Period) {
+    setDrafts(prev => ({ ...prev, [prov]: { ...prev[prov], [field]: value } }));
+  }
+
+  async function handleSave() {
+    setSaving(true); setMsg(null);
+    try {
+      const payload: Record<string, { enabled: boolean; limit_usd: number; period: Period }> = {};
+      for (const k of ["openai", "anthropic", "google"] as ProvKey[]) {
+        const d = drafts[k];
+        payload[k] = { enabled: d.enabled, limit_usd: parseFloat(d.limit_usd) || 0, period: d.period };
+      }
+      await updateSpendLimits(payload);
+      const s = await fetchSpendStatus();
+      setStatus(s.statuses);
+      setMsg("Saved!");
+      setTimeout(() => setMsg(null), 3000);
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card title="Spend limits" subtitle="Set a USD budget per provider. The SDK will block calls that would exceed the limit.">
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem", marginTop: "0.75rem" }}>
+        {PROV_CONFIG.map(({ key, label, color }) => {
+          const draft = drafts[key];
+          const st = status.find(s => s.provider === key);
+          const pct = st ? Math.min(100, st.pct_used) : 0;
+          const barColor = pct > 90 ? C.red : pct > 70 ? C.yellow : color;
+          return (
+            <div key={key} style={{ borderRadius: 8, border: `1px solid ${C.border}`, padding: "0.7rem 0.9rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.55rem" }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                <span style={{ fontWeight: 600, fontSize: "0.88rem", color: C.text, flex: 1 }}>{label}</span>
+                <label style={{ display: "flex", alignItems: "center", gap: "0.35rem", cursor: "pointer", fontSize: "0.8rem", color: C.subtle }}>
+                  <input type="checkbox" checked={draft.enabled} onChange={e => update(key, "enabled", e.target.checked)} style={{ accentColor: color }} />
+                  {draft.enabled ? "Enabled" : "Disabled"}
+                </label>
+              </div>
+              <div style={{ display: "flex", gap: "0.4rem", alignItems: "center", marginBottom: st && draft.enabled ? "0.55rem" : 0, opacity: draft.enabled ? 1 : 0.4, pointerEvents: draft.enabled ? "auto" : "none" }}>
+                <span style={{ fontSize: "0.85rem", color: C.subtle }}>$</span>
+                <input
+                  type="number" min="0" step="0.01" value={draft.limit_usd}
+                  onChange={e => update(key, "limit_usd", e.target.value)}
+                  style={{ width: 80, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: "0.28rem 0.45rem", fontSize: "0.88rem" }}
+                />
+                <select
+                  value={draft.period} onChange={e => update(key, "period", e.target.value as Period)}
+                  style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: "0.28rem 0.45rem", fontSize: "0.82rem" }}
+                >
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </div>
+              {st && draft.enabled && (
+                <div>
+                  <div style={{ height: 5, background: C.border, borderRadius: 3, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${pct}%`, background: barColor, borderRadius: 3, transition: "width 0.4s" }} />
+                  </div>
+                  <div style={{ fontSize: "0.77rem", color: C.muted, marginTop: "0.3rem" }}>
+                    ${st.spent_usd.toFixed(4)} spent · ${st.remaining_usd.toFixed(4)} remaining · resets {new Date(st.resets_at).toLocaleDateString()}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <button onClick={handleSave} disabled={saving} style={{ ...btnStyle(C.accent) }}>
+            {saving ? "Saving…" : "Save limits"}
+          </button>
+          {msg && <span style={{ fontSize: "0.85rem", color: msg === "Saved!" ? C.green : C.red }}>{msg}</span>}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 function SettingsPage({ quota, user, mobile }: { quota: { limit: number; used: number; remaining: number; reset_at: number; window_ms: number } | undefined; user?: UserOut | null; mobile?: boolean }) {
   const pct = quota ? Math.round((quota.used / quota.limit) * 100) : 0;
@@ -1379,14 +1500,7 @@ function SettingsPage({ quota, user, mobile }: { quota: { limit: number; used: n
         </div>
       </Card>
 
-      <Card title="Rate limits" subtitle="Set monthly token budgets per user — coming soon">
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "0.75rem", opacity: 0.5, pointerEvents: "none" }}>
-          <LabeledInput label="Monthly token limit" defaultValue="5000000" />
-          <LabeledInput label="Daily token limit" defaultValue="500000" />
-          <LabeledInput label="Alert threshold (%)" defaultValue="80" />
-          <button style={{ ...btnStyle(C.accent), alignSelf: "flex-start", marginTop: "0.25rem" }}>Save limits</button>
-        </div>
-      </Card>
+      <SpendLimitsCard />
 
       <Card title="SMS Alerts" subtitle="Get texted when you hit 80% or 100% of your daily token quota">
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "0.75rem" }}>
@@ -1545,21 +1659,6 @@ function EmptyState({ label }: { label: string }) {
   );
 }
 
-let labeledIdCounter = 0;
-function LabeledInput({ label, defaultValue, placeholder }: { label: string; defaultValue?: string; placeholder?: string }) {
-  const [id] = useState(() => `labeled-${++labeledIdCounter}`);
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-      <label htmlFor={id} style={{ fontSize: "0.82rem", color: C.subtle }}>{label}</label>
-      <input
-        id={id}
-        defaultValue={defaultValue}
-        placeholder={placeholder}
-        style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.5rem 0.75rem", fontSize: "0.9rem" }}
-      />
-    </div>
-  );
-}
 
 function btnStyle(color: string): React.CSSProperties {
   return { background: color, color: C.onAccent, border: "none", borderRadius: 8, padding: "0.5rem 1rem", cursor: "pointer", fontSize: "0.85rem", fontWeight: 600 };

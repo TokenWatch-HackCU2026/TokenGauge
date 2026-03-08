@@ -243,6 +243,47 @@ export function recalculateCosts(): Promise<{ recalculated: number }> {
   return post("/usage/recalculate-costs", {});
 }
 
+// ── Spend limits ──────────────────────────────────────────────────────────────
+
+export interface ProviderLimit {
+  limit_usd: number;
+  period: "daily" | "weekly" | "monthly";
+  enabled: boolean;
+}
+
+export interface SpendLimits {
+  openai?: ProviderLimit;
+  anthropic?: ProviderLimit;
+  google?: ProviderLimit;
+}
+
+export interface ProviderSpendStatus {
+  provider: string;
+  limit_usd: number;
+  period: string;
+  enabled: boolean;
+  spent_usd: number;
+  remaining_usd: number;
+  pct_used: number;
+  resets_at: string;
+}
+
+export interface SpendStatusOut {
+  statuses: ProviderSpendStatus[];
+}
+
+export function fetchSpendLimits(): Promise<SpendLimits> {
+  return get("/dashboard/spend-limits");
+}
+
+export function updateSpendLimits(limits: SpendLimits): Promise<SpendLimits> {
+  return put("/dashboard/spend-limits", limits);
+}
+
+export function fetchSpendStatus(): Promise<SpendStatusOut> {
+  return get("/dashboard/spend-status");
+}
+
 // ── Live WebSocket ─────────────────────────────────────────────────────────────
 
 export function createLiveSocket(onRecords: (records: ApiCall[]) => void): WebSocket {

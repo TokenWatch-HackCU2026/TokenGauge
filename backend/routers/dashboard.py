@@ -1,14 +1,15 @@
 import time
 from datetime import datetime, timedelta, timezone
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 
 from beanie import PydanticObjectId
 from bson import ObjectId
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from auth import get_current_user
 from database import get_db
+from models import User
 from redis_client import cache_get, cache_set, make_cache_key
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -240,3 +241,132 @@ async def get_cost_stats(current_user: dict = Depends(get_current_user)):
         return CostStats(mean=0.0, std_dev=0.0, count=rows[0]["count"] if rows else 0)
     r = rows[0]
     return CostStats(mean=r["mean"], std_dev=r["std_dev"] or 0.0, count=r["count"])
+
+
+# ── Spend Limits ───────────────────────────────────────────────────────────────
+
+_SPEND_PROVIDERS = ["openai", "anthropic", "google"]
+
+
+class ProviderLimitIn(BaseModel):
+    limit_usd: float
+    period: Literal["daily", "weekly", "monthly"]
+    enabled: bool = True
+
+
+class SpendLimitsIn(BaseModel):
+    openai: Optional[ProviderLimitIn] = None
+    anthropic: Optional[ProviderLimitIn] = None
+    google: Optional[ProviderLimitIn] = None
+
+
+class ProviderLimitOut(BaseModel):
+    limit_usd: float
+    period: str
+    enabled: bool
+
+
+class SpendLimitsOut(BaseModel):
+    openai: Optional[ProviderLimitOut] = None
+    anthropic: Optional[ProviderLimitOut] = None
+    google: Optional[ProviderLimitOut] = None
+
+
+class ProviderSpendStatusOut(BaseModel):
+    provider: str
+    limit_usd: float
+    period: str
+    enabled: bool
+    spent_usd: float
+    remaining_usd: float
+    pct_used: float
+    resets_at: str
+
+
+class SpendStatusOut(BaseModel):
+    statuses: List[ProviderSpendStatusOut]
+
+
+def _period_window(period: str) -> tuple[datetime, datetime]:
+    """Return (period_start, resets_at) UTC datetimes for the given period."""
+    now = datetime.now(timezone.utc)
+    if period == "daily":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        resets = start + timedelta(days=1)
+    elif period == "weekly":
+        start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        resets = start + timedelta(weeks=1)
+    else:  # monthly
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        resets = start.replace(month=start.month + 1) if start.month < 12 else start.replace(year=start.year + 1, month=1)
+    return start, resets
+
+
+@router.get("/spend-limits", response_model=SpendLimitsOut)
+async def get_spend_limits(current_user: dict = Depends(get_current_user)):
+    user = await User.get(PydanticObjectId(current_user["user_id"]))
+    if not user:
+        return SpendLimitsOut()
+    result: dict[str, Any] = {}
+    for prov in _SPEND_PROVIDERS:
+        raw = user.spend_limits.get(prov)
+        if raw:
+            result[prov] = ProviderLimitOut(**raw)
+    return SpendLimitsOut(**result)
+
+
+@router.put("/spend-limits", response_model=SpendLimitsOut)
+async def update_spend_limits(
+    body: SpendLimitsIn,
+    current_user: dict = Depends(get_current_user),
+):
+    user = await User.get(PydanticObjectId(current_user["user_id"]))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    new_limits = dict(user.spend_limits)
+    for prov in _SPEND_PROVIDERS:
+        val = getattr(body, prov)
+        if val is not None:
+            new_limits[prov] = val.model_dump()
+    user.spend_limits = new_limits
+    user.updated_at = datetime.now(timezone.utc)
+    await user.save()
+    result: dict[str, Any] = {}
+    for prov in _SPEND_PROVIDERS:
+        raw = new_limits.get(prov)
+        if raw:
+            result[prov] = ProviderLimitOut(**raw)
+    return SpendLimitsOut(**result)
+
+
+@router.get("/spend-status", response_model=SpendStatusOut)
+async def get_spend_status(current_user: dict = Depends(get_current_user)):
+    user = await User.get(PydanticObjectId(current_user["user_id"]))
+    if not user or not user.spend_limits:
+        return SpendStatusOut(statuses=[])
+    uid = ObjectId(current_user["user_id"])
+    statuses: list[ProviderSpendStatusOut] = []
+    for prov, cfg in user.spend_limits.items():
+        period = cfg.get("period", "monthly")
+        limit_usd = float(cfg.get("limit_usd", 0.0))
+        enabled = bool(cfg.get("enabled", True))
+        period_start, resets_at = _period_window(period)
+        pipeline = [
+            {"$match": {"user_id": uid, "provider": prov, "timestamp": {"$gte": period_start}}},
+            {"$group": {"_id": None, "total": {"$sum": "$cost_usd"}}},
+        ]
+        rows = await get_db()["api_calls"].aggregate(pipeline).to_list(None)
+        spent = float(rows[0]["total"]) if rows else 0.0
+        remaining = max(0.0, limit_usd - spent)
+        pct = round((spent / limit_usd * 100) if limit_usd > 0 else 0.0, 1)
+        statuses.append(ProviderSpendStatusOut(
+            provider=prov,
+            limit_usd=limit_usd,
+            period=period,
+            enabled=enabled,
+            spent_usd=round(spent, 6),
+            remaining_usd=round(remaining, 6),
+            pct_used=pct,
+            resets_at=resets_at.isoformat(),
+        ))
+    return SpendStatusOut(statuses=statuses)

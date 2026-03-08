@@ -32,6 +32,10 @@ class User(Document):
     # SDK token (persistent, 1 year)
     sdk_token: Optional[str] = None
 
+    # Per-provider spend limits
+    # Format: { "openai": { "limit_usd": 10.0, "period": "monthly", "enabled": true }, ... }
+    spend_limits: dict = Field(default_factory=dict)
+
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
