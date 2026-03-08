@@ -11,6 +11,9 @@ services:
       - DB_NAME=tokengauge
       - MONGO_URI=mongodb://mongo:27017
       - REDIS_URL=redis://redis:6379
+      - SEED_ON_START=true
+      - SEED_EMAIL=${SEED_EMAIL:-test@tokengauge.dev}
+      - SEED_PASSWORD=${SEED_PASSWORD:-password123}
     env_file:
       - .env
     volumes:
@@ -18,7 +21,8 @@ services:
     depends_on:
       - mongo
       - redis
-    command: uvicorn main:app --host 0.0.0.0 --port 3001 --reload
+    entrypoint: ["/app/backend/entrypoint.sh"]
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3001", "--reload"]
 
   frontend:
     build:
