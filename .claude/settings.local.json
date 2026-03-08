@@ -67,5 +67,8 @@
       "Bash(cd /Users/james-vallery/Desktop/Code/HACKCU_2026/tokenwatch-sdk && pip3 install --break-system-packages pytest 2>&1 | tail -3 && python3 -m pytest tests/test_classifier.py -v 2>&1)",
       "Bash(cd /Users/james-vallery/Desktop/Code/HACKCU_2026/frontend && npx tsc --noEmit 2>&1)"
     ]
+  },
+  "enabledPlugins": {
+    "impeccable@impeccable": true
   }
 }

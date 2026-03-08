@@ -34,14 +34,16 @@ function rangeToParams(range: Range) {
   return { startDate: new Date(now.getTime() - offset).toISOString(), endDate: now.toISOString() };
 }
 
-// Auto-pick chart granularity from range
-function rangeToGranularity(range: Range): "hour" | "day" | "week" | "month" {
+// Auto-pick chart granularity from range — fine intervals for smooth scrubbing
+function rangeToGranularity(range: Range): Granularity {
   switch (range) {
-    case "live": case "1D": return "hour";
-    case "1W": return "day";
-    case "1M": case "3M": return "day";
-    case "YTD": case "1Y": return "week";
-    case "ALL": return "month";
+    case "live":  return "15s";
+    case "1D":    return "15min";
+    case "1W":    return "1hr";
+    case "1M":    return "4hr";
+    case "3M":    return "12hr";
+    case "YTD": case "1Y": return "1day";
+    case "ALL":   return "1week";
   }
 }
 
@@ -259,31 +261,45 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
 
 // ─── Chart helpers ─────────────────────────────────────────────────────────────
 
-type Granularity = "hour" | "day" | "week" | "month";
+type Granularity = "15s" | "15min" | "1hr" | "4hr" | "12hr" | "1day" | "1week";
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
 // Returns { sort: sortable key, label: display label } in browser local time
 function bucketInfoFromDate(d: Date, gran: Granularity): { sort: string; label: string } {
-  const Y = d.getFullYear(), M = d.getMonth(), D = d.getDate(), H = d.getHours();
+  const Y = d.getFullYear(), M = d.getMonth(), D = d.getDate(), H = d.getHours(), min = d.getMinutes(), sec = d.getSeconds();
+  const h12 = H % 12 || 12;
+  const ampm = H >= 12 ? "PM" : "AM";
+
   switch (gran) {
-    case "hour": {
-      const ampm = H >= 12 ? "PM" : "AM";
-      const h12 = H % 12 || 12;
-      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}T${pad2(H)}`, label: `${h12} ${ampm}` };
+    case "15s": {
+      const s15 = Math.floor(sec / 15) * 15;
+      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}T${pad2(H)}:${pad2(min)}:${pad2(s15)}`, label: `${h12}:${pad2(min)}:${pad2(s15)} ${ampm}` };
     }
-    case "day": {
-      const dayName = d.toLocaleString("default", { weekday: "short" });
-      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}`, label: `${dayName} ${M+1}/${D}` };
+    case "15min": {
+      const m15 = Math.floor(min / 15) * 15;
+      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}T${pad2(H)}:${pad2(m15)}`, label: `${h12}:${pad2(m15)} ${ampm}` };
     }
-    case "week": {
+    case "1hr":
+      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}T${pad2(H)}`, label: `${d.toLocaleString("default", { weekday: "short" })} ${h12} ${ampm}` };
+    case "4hr": {
+      const h4 = Math.floor(H / 4) * 4;
+      const h4_12 = h4 % 12 || 12;
+      const ampm4 = h4 >= 12 ? "PM" : "AM";
+      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}T${pad2(h4)}`, label: `${M+1}/${D} ${h4_12} ${ampm4}` };
+    }
+    case "12hr": {
+      const half = H < 12 ? "AM" : "PM";
+      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}T${half}`, label: `${M+1}/${D} ${half}` };
+    }
+    case "1day":
+      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}`, label: `${d.toLocaleString("default", { weekday: "short" })} ${d.toLocaleString("default", { month: "short" })} ${D}` };
+    case "1week": {
       const dow = d.getDay();
       const mon = new Date(d);
       mon.setDate(D - dow + (dow === 0 ? -6 : 1));
       const wY = mon.getFullYear(), wM = mon.getMonth(), wD = mon.getDate();
       return { sort: `${wY}-${pad2(wM+1)}-${pad2(wD)}`, label: `${mon.toLocaleString("default", { month: "short" })} ${wD}` };
     }
-    case "month":
-      return { sort: `${Y}-${pad2(M+1)}`, label: d.toLocaleString("default", { month: "short", year: "2-digit" }) };
   }
 }
 
@@ -291,13 +307,12 @@ function bucketInfo(ts: string, gran: Granularity) {
   return bucketInfoFromDate(new Date(ts), gran);
 }
 
-// Generate every bucket in a range so the X-axis is continuous (zeros where no data)
+// Generate every bucket in a range so the chart is continuous (zeros where no data)
 function generateTimeline(range: Range, gran: Granularity): { sort: string; label: string }[] {
   const now = new Date();
   let start: Date;
 
   if (range === "ALL") {
-    // Go back 12 months
     start = new Date(now);
     start.setMonth(start.getMonth() - 12);
   } else if (range === "YTD") {
@@ -315,14 +330,20 @@ function generateTimeline(range: Range, gran: Granularity): { sort: string; labe
   const cursor = new Date(start);
 
   // Align cursor to bucket boundary
-  if (gran === "hour") { cursor.setMinutes(0, 0, 0); }
-  else if (gran === "day") { cursor.setHours(0, 0, 0, 0); }
-  else if (gran === "week") {
-    cursor.setHours(0, 0, 0, 0);
-    const dow = cursor.getDay();
-    cursor.setDate(cursor.getDate() - dow + (dow === 0 ? -6 : 1));
+  switch (gran) {
+    case "15s":  cursor.setMilliseconds(0); cursor.setSeconds(Math.floor(cursor.getSeconds() / 15) * 15); break;
+    case "15min": cursor.setSeconds(0, 0); cursor.setMinutes(Math.floor(cursor.getMinutes() / 15) * 15); break;
+    case "1hr":  cursor.setMinutes(0, 0, 0); break;
+    case "4hr":  cursor.setMinutes(0, 0, 0); cursor.setHours(Math.floor(cursor.getHours() / 4) * 4); break;
+    case "12hr": cursor.setMinutes(0, 0, 0); cursor.setHours(cursor.getHours() < 12 ? 0 : 12); break;
+    case "1day": cursor.setHours(0, 0, 0, 0); break;
+    case "1week": {
+      cursor.setHours(0, 0, 0, 0);
+      const dow = cursor.getDay();
+      cursor.setDate(cursor.getDate() - dow + (dow === 0 ? -6 : 1));
+      break;
+    }
   }
-  else if (gran === "month") { cursor.setDate(1); cursor.setHours(0, 0, 0, 0); }
 
   while (cursor <= now) {
     const info = bucketInfoFromDate(cursor, gran);
@@ -331,10 +352,15 @@ function generateTimeline(range: Range, gran: Granularity): { sort: string; labe
       timeline.push(info);
     }
     // Advance cursor
-    if (gran === "hour") cursor.setHours(cursor.getHours() + 1);
-    else if (gran === "day") cursor.setDate(cursor.getDate() + 1);
-    else if (gran === "week") cursor.setDate(cursor.getDate() + 7);
-    else cursor.setMonth(cursor.getMonth() + 1);
+    switch (gran) {
+      case "15s":  cursor.setSeconds(cursor.getSeconds() + 15); break;
+      case "15min": cursor.setMinutes(cursor.getMinutes() + 15); break;
+      case "1hr":  cursor.setHours(cursor.getHours() + 1); break;
+      case "4hr":  cursor.setHours(cursor.getHours() + 4); break;
+      case "12hr": cursor.setHours(cursor.getHours() + 12); break;
+      case "1day": cursor.setDate(cursor.getDate() + 1); break;
+      case "1week": cursor.setDate(cursor.getDate() + 7); break;
+    }
   }
   return timeline;
 }
