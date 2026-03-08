@@ -12,7 +12,7 @@ services:
       - key: DB_NAME
         value: tokengauge
       - key: MONGO_URI
-        sync: false  # prompted on first deploy
+        sync: false  # set this in the Render dashboard
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_ALGORITHM
@@ -21,34 +21,8 @@ services:
         value: "15"
       - key: REFRESH_TOKEN_EXPIRE_DAYS
         value: "7"
-      - key: REDIS_URL
-        fromService:
-          name: tokengauge-redis
-          type: redis
-          property: connectionString
       - key: FRONTEND_URL
         value: https://tokengauge.onrender.com
-
-  # ── Arq Background Worker ──
-  - type: worker
-    name: tokengauge-worker
-    runtime: docker
-    dockerfilePath: backend/Dockerfile
-    dockerContext: .
-    plan: free
-    dockerCommand: python -m arq workers.worker.WorkerSettings
-    envVars:
-      - key: PYTHONPATH
-        value: /app
-      - key: MONGO_URI
-        sync: false
-      - key: DB_NAME
-        value: tokengauge
-      - key: REDIS_URL
-        fromService:
-          name: tokengauge-redis
-          type: redis
-          property: connectionString
 
   # ── React Frontend (Static Site) ──
   - type: web
@@ -77,10 +51,3 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
-
-  # ── Managed Redis ──
-  - type: redis
-    name: tokengauge-redis
-    plan: free
-    maxmemoryPolicy: allkeys-lru
-    ipAllowList: []  # only internal access
