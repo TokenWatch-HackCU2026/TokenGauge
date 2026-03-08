@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal,Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, validator
 import re
@@ -85,6 +85,7 @@ class ApiCallOut(ApiCallCreate):
     prompt_type: Optional[str] = None
     complexity: Optional[int] = None
     timestamp: datetime
+    cost_flag: Optional[Literal["low", "medium", "high"]] = None
 
     class Config:
         from_attributes = True

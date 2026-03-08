@@ -561,6 +561,11 @@ function SettingsPage({ quota, user }: { quota: { limit: number; used: number; r
     </div>
   );
 }
+const FLAG_COLORS = {
+  low: "#22c55e",
+  medium: "#f59e0b",
+  high: "#ef4444",
+};
 
 // ─── Shared components ────────────────────────────────────────────────────────
 function RequestsTable({ records }: { records: ApiCall[] }) {
@@ -570,7 +575,7 @@ function RequestsTable({ records }: { records: ApiCall[] }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
         <thead>
           <tr>
-            {["Time", "Provider", "Model", "App Tag", "Key", "In", "Out", "Latency", "Cost"].map(h => (
+            {["Time", "Provider", "Model", "App Tag", "Key", "In", "Out", "Latency", "Cost", "Level"].map(h => (
               <th key={h} style={{ textAlign: "left", padding: "0.5rem 0.75rem", color: C.muted, fontSize: "0.8rem", fontWeight: 500, borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" }}>{h}</th>
             ))}
           </tr>
@@ -587,6 +592,13 @@ function RequestsTable({ records }: { records: ApiCall[] }) {
               <td style={tdStyle}>{r.tokens_out.toLocaleString()}</td>
               <td style={{ ...tdStyle, color: C.subtle }}>{r.latency_ms}ms</td>
               <td style={{ ...tdStyle, color: C.accentLight, fontWeight: 600 }}>{fmtCost(r.cost_usd)}</td>
+              <td style={tdStyle}>
+                {r.cost_flag ? (
+                  <Pill color={FLAG_COLORS[r.cost_flag]}>
+                    {r.cost_flag.charAt(0).toUpperCase() + r.cost_flag.slice(1)}
+                  </Pill>
+                ) : "—"}
+              </td>
             </tr>
           ))}
         </tbody>

@@ -137,6 +137,8 @@ export interface ApiCall {
   app_tag: string | null;
   key_hint: string | null;
   timestamp: string;
+  cost_flag: "low" | "medium" | "high" | null;
+
 }
 
 export interface ApiCallSummary {

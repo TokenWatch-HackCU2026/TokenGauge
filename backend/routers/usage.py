@@ -83,7 +83,31 @@ async def get_usage(limit: int = 100, skip: int = 0, current_user: dict = Depend
         .limit(limit)
         .to_list()
     )
-    return [_to_out(d) for d in docs]
+    stats_pipeline = [
+        {"$match": {"user_id": ObjectId(current_user["user_id"]), "cost_usd": {"$gt": 0}}},
+        {"$group": {
+            "_id": None,
+            "mean": {"$avg": "$cost_usd"},
+            "std_dev": {"$stdDevPop": "$cost_usd"},
+            "count": {"$sum": 1},
+        }},
+    ]
+    stats_rows = await get_db()["api_calls"].aggregate(stats_pipeline).to_list(None)
+    mean = std_dev = 0.0
+    if stats_rows and stats_rows[0]["count"] >= 2:
+        mean = stats_rows[0]["mean"]
+        std_dev = stats_rows[0]["std_dev"] or 0.0
+
+    def flag(cost: float) -> str | None:
+        if std_dev == 0 or mean == 0:
+            return None
+        if cost < mean - std_dev:
+            return "low"
+        if cost > mean + std_dev:
+            return "high"
+        return "medium"
+
+    return [_to_out(d, flag(d.cost_usd)) for d in docs]
 
 
 @router.get("/summary", response_model=List[ApiCallSummary])
@@ -143,7 +167,7 @@ async def recalculate_costs(current_user: dict = Depends(get_current_user)):
     return {"recalculated": updated}
 
 
-def _to_out(doc: ApiCall) -> ApiCallOut:
+def _to_out(doc: ApiCall, cost_flag: str | None = None) -> ApiCallOut:
     return ApiCallOut(
         id=str(doc.id),
         user_id=str(doc.user_id),
@@ -158,4 +182,5 @@ def _to_out(doc: ApiCall) -> ApiCallOut:
         prompt_type=doc.prompt_type,
         complexity=doc.complexity,
         timestamp=doc.timestamp,
+        cost_flag=cost_flag,
     )
