@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: tokengauge
-Version: 0.1.8
+Version: 0.2.0
 Summary: Zero-config AI usage tracking — wrap any OpenAI/Anthropic/Gemini client and log to your TokenGauge dashboard
 License: MIT
 Keywords: ai,llm,openai,anthropic,gemini,token,usage,tracking,observability

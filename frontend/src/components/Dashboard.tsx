@@ -190,7 +190,7 @@ function OverviewPage({ summary, records, timeseries, breakdown, dashSummary, lo
   return (
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "1rem", marginBottom: "1.5rem" }}>
-        <KpiCard label="Total Spend" value={loading ? "—" : `$${(dashSummary?.total_cost_usd ?? 0).toFixed(4)}`} />
+        <KpiCard label="Total Spend" value={loading ? "—" : fmtCost(dashSummary?.total_cost_usd ?? 0)} />
         <KpiCard label="Total Tokens" value={loading ? "—" : fmtNum((dashSummary?.total_tokens_in ?? 0) + (dashSummary?.total_tokens_out ?? 0))} />
         <KpiCard label="API Calls" value={loading ? "—" : fmtNum(dashSummary?.request_count ?? 0)} />
         <KpiCard label="Avg Latency" value={loading ? "—" : `${(dashSummary?.avg_latency_ms ?? 0).toFixed(0)}ms`} />
@@ -201,10 +201,10 @@ function OverviewPage({ summary, records, timeseries, breakdown, dashSummary, lo
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={timeseries}>
               <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 12 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: C.muted, fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
+              <YAxis tick={{ fill: C.muted, fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} />
               <Tooltip
                 contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
-                formatter={(v: number) => [`$${v.toFixed(4)}`, "Cost"]}
+                formatter={(v: number) => [fmtCost(v), "Cost"]}
               />
               <Line type="monotone" dataKey="cost_usd" stroke={C.accent} strokeWidth={2.5} dot={false} name="Cost" />
             </LineChart>
@@ -220,7 +220,7 @@ function OverviewPage({ summary, records, timeseries, breakdown, dashSummary, lo
                 </Pie>
                 <Tooltip
                   contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
-                  formatter={(v: number) => [`$${v.toFixed(4)}`, "Cost"]}
+                  formatter={(v: number) => [fmtCost(v), "Cost"]}
                 />
                 <Legend iconType="circle" iconSize={8} formatter={v => <span style={{ color: C.subtle, fontSize: 12 }}>{v}</span>} />
               </PieChart>
@@ -237,10 +237,10 @@ function OverviewPage({ summary, records, timeseries, breakdown, dashSummary, lo
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={breakdown} barSize={28}>
                 <XAxis dataKey="model" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
+                <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} />
                 <Tooltip
                   contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
-                  formatter={(v: number) => [`$${v.toFixed(4)}`, "Cost"]}
+                  formatter={(v: number) => [fmtCost(v), "Cost"]}
                 />
                 <Bar dataKey="cost_usd" fill={C.accent} radius={[4, 4, 0, 0]} name="Cost (USD)" />
               </BarChart>
@@ -273,7 +273,7 @@ function UsagePage({ summary, records, loading }: { summary: ApiCallSummary[]; r
               <Metric label="Requests" value={fmtNum(s.request_count)} />
               <Metric label="In tokens" value={fmtNum(s.total_tokens_in)} />
               <Metric label="Out tokens" value={fmtNum(s.total_tokens_out)} />
-              <Metric label="Cost" value={`$${s.total_cost_usd.toFixed(4)}`} accent />
+              <Metric label="Cost" value={fmtCost(s.total_cost_usd)} accent />
             </div>
           </Card>
         ))}
@@ -425,7 +425,7 @@ function RequestsTable({ records }: { records: ApiCall[] }) {
               <td style={tdStyle}>{r.tokens_in.toLocaleString()}</td>
               <td style={tdStyle}>{r.tokens_out.toLocaleString()}</td>
               <td style={{ ...tdStyle, color: C.subtle }}>{r.latency_ms}ms</td>
-              <td style={{ ...tdStyle, color: C.accentLight, fontWeight: 600 }}>${r.cost_usd.toFixed(6)}</td>
+              <td style={{ ...tdStyle, color: C.accentLight, fontWeight: 600 }}>{fmtCost(r.cost_usd)}</td>
             </tr>
           ))}
         </tbody>
@@ -516,4 +516,12 @@ function fmtNum(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toString();
+}
+
+function fmtCost(v: number): string {
+  if (v === 0) return "$0.00";
+  if (v >= 1) return `$${v.toFixed(2)}`;
+  if (v >= 0.01) return `$${v.toFixed(4)}`;
+  if (v >= 0.0001) return `$${v.toFixed(6)}`;
+  return `$${v.toExponential(2)}`;
 }
