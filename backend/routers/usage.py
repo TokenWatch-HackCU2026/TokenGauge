@@ -7,7 +7,7 @@ from typing import List
 from beanie import PydanticObjectId
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from jose import JWTError, jwt
 
 from auth import get_current_user
@@ -78,12 +78,7 @@ async def log_usage(record: ApiCallCreate, current_user: dict = Depends(get_curr
         data["cost_usd"] = _calc_cost(data["model"], data.get("tokens_in", 0), data.get("tokens_out", 0))
     doc = ApiCall(user_id=uid, **data)
     await doc.insert()
-    out = _to_out(doc)
-    # Instantly push to any open WebSocket for this user
-    uid_str = str(uid)
-    if uid_str in _live_queues:
-        await _live_queues[uid_str].put(out)
-    return out
+    return _to_out(doc)
 
 
 @router.get("/", response_model=List[ApiCallOut])
@@ -179,6 +174,31 @@ async def recalculate_costs(current_user: dict = Depends(get_current_user)):
             await doc.save()
             updated += 1
     return {"recalculated": updated}
+
+
+@router.post("/webhook/atlas")
+async def atlas_webhook(request: Request, x_atlas_secret: str = Header(None)):
+    """Receive insert events from MongoDB Atlas Triggers and push to open WebSocket queues."""
+    secret = os.environ.get("ATLAS_WEBHOOK_SECRET", "")
+    if not secret or x_atlas_secret != secret:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    payload = await request.json()
+    user_id: str = payload.get("user_id", "")
+    doc: dict = payload.get("document", {})
+
+    if not user_id or not doc:
+        raise HTTPException(status_code=422, detail="Missing user_id or document")
+
+    try:
+        out = ApiCallOut(**doc)
+    except Exception:
+        raise HTTPException(status_code=422, detail="Invalid document shape")
+
+    if user_id in _live_queues:
+        await _live_queues[user_id].put(out)
+
+    return {"ok": True}
 
 
 @router.websocket("/ws/live")
