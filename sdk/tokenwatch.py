@@ -1,20 +1,20 @@
 """
-TokenWatch SDK — zero-config AI usage tracking
+TokenGauge SDK — zero-config AI usage tracking
 
 Wraps your existing OpenAI / Anthropic client so every call is automatically
-logged to your TokenWatch dashboard. Your API keys stay with you — the SDK
-only reads token counts from responses and ships them to TokenWatch.
+logged to your TokenGauge dashboard. Your API keys stay with you — the SDK
+only reads token counts from responses and ships them to TokenGauge.
 
 Install
 -------
-    pip install tokenwatch          # coming soon
+    pip install tokengauge          # coming soon
     pip install -e ./sdk            # local dev
 
 Quick start
 -----------
-    from tokenwatch import TokenWatch
+    from tokengauge import TokenGauge
 
-    tw = TokenWatch.login("you@example.com", "password")
+    tw = TokenGauge.login("you@example.com", "password")
 
     # Drop-in OpenAI wrapper — use exactly as before
     import openai
@@ -35,6 +35,9 @@ Quick start
 
     # Tag calls by app / feature
     client = tw.wrap(openai.OpenAI(api_key="sk-..."), app_tag="summarizer")
+
+NOTE: The class is named TokenGauge but the file is tokenwatch.py for
+backward compatibility with the published tokenwatch-sdk PyPI package.
 """
 
 from __future__ import annotations
@@ -80,14 +83,14 @@ def _calc_cost(model: str, tokens_in: int, tokens_out: int) -> float:
 
 # ── Main client ───────────────────────────────────────────────────────────────
 
-class TokenWatch:
+class TokenGauge:
     """
-    Central TokenWatch client. Create one instance per app and reuse it.
+    Central TokenGauge client. Create one instance per app and reuse it.
 
     Parameters
     ----------
-    token:    JWT access token obtained from TokenWatch login.
-    base_url: Base URL of your TokenWatch server.
+    token:    JWT access token obtained from TokenGauge login.
+    base_url: Base URL of your TokenGauge server.
     app_tag:  Optional default tag applied to all logged calls (overridable per wrap).
     """
 
@@ -110,11 +113,11 @@ class TokenWatch:
         password: str,
         base_url: str = "http://localhost:8000",
         app_tag: str | None = None,
-    ) -> "TokenWatch":
+    ) -> "TokenGauge":
         """
-        Authenticate and return a ready-to-use TokenWatch instance.
+        Authenticate and return a ready-to-use TokenGauge instance.
 
-            tw = TokenWatch.login("you@example.com", "password")
+            tw = TokenGauge.login("you@example.com", "password")
         """
         try:
             import httpx

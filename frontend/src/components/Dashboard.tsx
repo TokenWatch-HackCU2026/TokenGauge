@@ -90,7 +90,7 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
         <div style={{ padding: "1.5rem 1.25rem 1.25rem", borderBottom: `1px solid ${C.border}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
             <div style={{ width: 32, height: 32, borderRadius: 8, background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem" }}>⬡</div>
-            <span style={{ fontWeight: 700, fontSize: "1.05rem", letterSpacing: "-0.02em" }}>TokenWatch</span>
+            <span style={{ fontWeight: 700, fontSize: "1.05rem", letterSpacing: "-0.02em" }}>TokenGauge</span>
           </div>
         </div>
 
@@ -336,10 +336,10 @@ function SettingsPage({ quota }: { quota: { limit: number; used: number; remaini
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem", maxWidth: 560 }}>
-      <Card title="SDK Token" subtitle="Use this token with the tokenwatch-sdk package (valid 1 year)">
+      <Card title="SDK Token" subtitle="Use this token with the tokengauge-sdk package (valid 1 year)">
         <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
           <p style={{ margin: 0, fontSize: "0.85rem", color: C.subtle }}>
-            Install: <code style={{ background: C.bg, padding: "2px 6px", borderRadius: 4 }}>pip install tokenwatch-sdk</code>
+            Install: <code style={{ background: C.bg, padding: "2px 6px", borderRadius: 4 }}>pip install tokengauge-sdk</code>
           </p>
           {sdkToken && (
             <div style={{ fontFamily: "monospace", fontSize: "0.78rem", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.6rem 0.8rem", wordBreak: "break-all", color: C.subtle }}>

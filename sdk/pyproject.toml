@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.backends.legacy:build"
 
 [project]
-name = "tokenwatch-sdk"
+name = "tokengauge-sdk"
 version = "0.1.0"
-description = "Zero-config AI usage tracking — wrap any OpenAI/Anthropic client and log to your TokenWatch dashboard"
+description = "Zero-config AI usage tracking — wrap any OpenAI/Anthropic client and log to your TokenGauge dashboard"
 requires-python = ">=3.9"
 dependencies = ["httpx>=0.24"]
 
@@ -15,4 +15,4 @@ anthropic  = ["anthropic>=0.20"]
 all        = ["openai>=1.0", "anthropic>=0.20"]
 
 [tool.setuptools]
-py-modules = ["tokenwatch"]
+py-modules = ["tokengauge"]

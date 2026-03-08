@@ -1,6 +1,6 @@
-# TokenWatch — Prompts
+# TokenGauge — Prompts
 
-Reusable prompt templates for common development tasks on the TokenWatch project.
+Reusable prompt templates for common development tasks on the TokenGauge project.
 
 ---
 
@@ -8,7 +8,7 @@ Reusable prompt templates for common development tasks on the TokenWatch project
 
 ### Build a new provider adapter
 ```
-I need to add a new AI provider adapter for [PROVIDER_NAME] to the TokenWatch proxy.
+I need to add a new AI provider adapter for [PROVIDER_NAME] to the TokenGauge proxy.
 
 Context:
 - The proxy is in Node.js + Express (TypeScript)
@@ -28,7 +28,7 @@ Create the adapter following the existing pattern in src/providers/. Include:
 
 ### Debug proxy latency issue
 ```
-The TokenWatch proxy is adding more than 50ms overhead. Current architecture:
+The TokenGauge proxy is adding more than 50ms overhead. Current architecture:
 [paste architecture.md proxy section]
 
 Profile the request lifecycle and identify where the latency is coming from.
@@ -41,7 +41,7 @@ Check: Redis rate limit check timing, KMS decryption timing, MongoDB write timin
 
 ### Write a MongoDB aggregation for usage
 ```
-Write a MongoDB aggregation pipeline for the TokenWatch `api_calls` collection that returns:
+Write a MongoDB aggregation pipeline for the TokenGauge `api_calls` collection that returns:
 - Total tokens in + out
 - Total cost (USD)
 - Breakdown by provider and model
@@ -54,7 +54,7 @@ Optimize for the existing indexes on: userId, timestamp, provider, model.
 
 ### Redis rate limit Lua script
 ```
-Write a Redis Lua script for TokenWatch's sliding window rate limiter.
+Write a Redis Lua script for TokenGauge's sliding window rate limiter.
 - Key format: ratelimit:{userId}:{windowStart}
 - Window size: [WINDOW_MS] milliseconds
 - Max tokens: [MAX_TOKENS] per window
@@ -90,7 +90,7 @@ Check for:
 
 ### Build a usage chart component
 ```
-Build a React component for the TokenWatch dashboard that shows [CHART_TYPE].
+Build a React component for the TokenGauge dashboard that shows [CHART_TYPE].
 
 Stack: Next.js 14 (App Router), React, Tailwind CSS, Recharts, TanStack Query.
 
@@ -110,7 +110,7 @@ The component should:
 
 ### Classify prompt complexity
 ```
-You are the TokenWatch query classifier. Analyze the following prompt and return a JSON object with:
+You are the TokenGauge query classifier. Analyze the following prompt and return a JSON object with:
 - complexity: integer 1-10 (1=trivial single-fact lookup, 10=deep multi-step reasoning)
 - type: one of "code" | "creative" | "analysis" | "chat" | "other"
 - reasoning: one sentence explaining the score
@@ -135,7 +135,7 @@ Return only valid JSON.
 
 ### Generate an Express route with validation
 ```
-Generate a TypeScript Express route handler for TokenWatch.
+Generate a TypeScript Express route handler for TokenGauge.
 
 Endpoint: [METHOD] [PATH]
 Auth required: [yes/no]
@@ -149,7 +149,7 @@ Follow the existing patterns in src/routes/. Use zod for validation, mongoose fo
 
 ### Write tests for a route
 ```
-Write Jest + Supertest integration tests for the following TokenWatch Express route:
+Write Jest + Supertest integration tests for the following TokenGauge Express route:
 [paste route code]
 
 Include tests for:

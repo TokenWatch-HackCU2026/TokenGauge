@@ -8,14 +8,16 @@ services:
     working_dir: /app/backend
     environment:
       - PORT=3001
-      - DB_NAME=tokenwatch
+      - DB_NAME=tokengauge
       - MONGO_URI=mongodb://mongo:27017
+      - REDIS_URL=redis://redis:6379
     env_file:
       - .env
     volumes:
       - ./backend:/app/backend
     depends_on:
       - mongo
+      - redis
     command: uvicorn main:app --host 0.0.0.0 --port 3001 --reload
 
   frontend:
@@ -29,6 +31,11 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
 
   mongo:
     image: mongo:7.0

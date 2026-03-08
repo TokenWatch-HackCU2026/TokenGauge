@@ -1,4 +1,4 @@
-# TokenWatch — Backend Test Results
+# TokenGauge — Backend Test Results
 
 **Run date:** March 7, 2026
 **Server:** `http://localhost:8000` (uvicorn, live MongoDB)
@@ -204,7 +204,7 @@ async def delete_record(record_id: str):
 5. **Return 422 instead of 500 for email validation failures** — add a global exception handler for pydantic `ValueError`
 
 ### P2 — Test improvements
-6. **Update conftest email domain** — change `@tokenwatch.test` → `@example.com` (`.test` TLD is reserved and rejected by email-validator)
+6. **Update conftest email domain** — change `@tokengauge.test` → `@example.com` (`.test` TLD is reserved and rejected by email-validator)
 7. **Add tests for auth-protected usage routes** once auth is wired in
 8. **Add `pytest-asyncio` tests for Beanie models** in isolation (unit tests, not just integration)
 9. **Add a `conftest.py`-level server health check** that skips the whole suite if the server is unreachable

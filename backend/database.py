@@ -26,10 +26,15 @@ async def connect_db() -> None:
     retries = 5
     for attempt in range(retries):
         try:
+            client_kwargs: dict = {
+                "serverSelectionTimeoutMS": 5000,
+            }
+            # Only use TLS CA file for Atlas (SRV) connections
+            if MONGO_URI.startswith("mongodb+srv"):
+                client_kwargs["tlsCAFile"] = certifi.where()
             _client = motor.motor_asyncio.AsyncIOMotorClient(
                 MONGO_URI,
-                serverSelectionTimeoutMS=5000,
-                tlsCAFile=certifi.where(),
+                **client_kwargs,
             )
             await _client.admin.command("ping")
             await init_beanie(
