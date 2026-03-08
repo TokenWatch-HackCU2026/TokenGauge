@@ -1,14 +1,30 @@
 # TokenGauge — REST API Reference
 
-Two auth types are used:
-- 🔒 **JWT** — short-lived access token for web app sessions (`Authorization: Bearer <jwt>`)
-- 🗝️ **SDK Token** — long-lived write-only token for SDK data ingestion (`Authorization: Bearer tw-...`)
+Base URL: `http://localhost:3001`
 
-All web app endpoints are prefixed with `/api/v1`.
+## Authentication
+
+Two auth mechanisms:
+- **JWT** — short-lived access token (15 min) for web app sessions (`Authorization: Bearer <jwt>`)
+- **SDK Token** — long-lived token (1 year) for SDK data ingestion (`Authorization: Bearer <sdk-jwt>`)
+
+Both are validated by the same `get_current_user` dependency. Any endpoint marked 🔒 requires a valid Bearer token.
 
 ---
 
-## Auth
+## Health
+
+### `GET /health`
+Returns API health status. No authentication required.
+
+**Response `200`**
+```json
+{ "status": "ok" }
+```
+
+---
+
+## Auth (`/api/v1/auth`)
 
 ### `POST /api/v1/auth/register`
 Register a new user account.
@@ -21,19 +37,30 @@ Register a new user account.
   "full_name": "Jane Doe"
 }
 ```
+- `full_name` is optional.
+
 **Response `201`**
 ```json
 {
-  "user": { "id": "...", "email": "...", "full_name": "..." },
   "access_token": "...",
-  "refresh_token": "..."
+  "refresh_token": "...",
+  "user": {
+    "id": "...",
+    "email": "...",
+    "full_name": "...",
+    "avatar_url": null,
+    "phone": null,
+    "created_at": "2026-03-07T00:00:00Z"
+  }
 }
 ```
+
+**Errors:** `409` email already registered, `422` validation error.
 
 ---
 
 ### `POST /api/v1/auth/login`
-Authenticate and receive tokens.
+Authenticate with email/password and receive tokens.
 
 **Request**
 ```json
@@ -42,14 +69,18 @@ Authenticate and receive tokens.
   "password": "..."
 }
 ```
+
 **Response `200`**
 ```json
 {
   "access_token": "...",
   "refresh_token": "...",
-  "expires_in": 900
+  "expires_in": 900,
+  "user": { ... }
 }
 ```
+
+**Errors:** `401` invalid credentials, `422` validation error.
 
 ---
 
@@ -60,6 +91,7 @@ Exchange a refresh token for a new access token.
 ```json
 { "refresh_token": "..." }
 ```
+
 **Response `200`**
 ```json
 {
@@ -68,104 +100,72 @@ Exchange a refresh token for a new access token.
 }
 ```
 
+**Errors:** `401` invalid/expired refresh token, `422` validation error.
+
 ---
 
 ### `POST /api/v1/auth/logout`
-Invalidate the current refresh token. 🔒 JWT
+Invalidate the current refresh token. Idempotent — garbage tokens return 204.
 
 **Request**
 ```json
 { "refresh_token": "..." }
 ```
+
 **Response `204`** — No content.
+
+**Errors:** `422` missing body.
 
 ---
 
-## Users
+### `GET /api/v1/auth/google`
+Get the Google OAuth redirect URL. Requires `GOOGLE_CLIENT_ID` and `GOOGLE_REDIRECT_URI` env vars.
 
-### `GET /api/v1/users/me`
-Get the authenticated user's profile. 🔒 JWT
+**Response `200`**
+```json
+{ "url": "https://accounts.google.com/o/oauth2/v2/auth?..." }
+```
+
+---
+
+### `GET /api/v1/auth/google/callback`
+Google OAuth callback. Exchanges the authorization code for tokens, creates or links user account.
+
+**Query params:** `code` (string, required)
 
 **Response `200`**
 ```json
 {
-  "id": "...",
-  "email": "...",
-  "full_name": "...",
-  "created_at": "2026-03-07T00:00:00Z"
+  "access_token": "...",
+  "refresh_token": "...",
+  "user": { ... }
 }
 ```
+
+**Errors:** `400` token exchange or userinfo fetch failed.
 
 ---
 
-### `PATCH /api/v1/users/me`
-Update the authenticated user's profile. 🔒 JWT
+### `GET /api/v1/auth/sdk-token` 🔒
+Get or regenerate the user's persistent SDK token (valid 1 year).
 
-**Request** *(all fields optional)*
-```json
-{
-  "full_name": "Jane Doe",
-  "phone": "+1..."
-}
-```
-**Response `200`** — Updated user object.
-
----
-
-## SDK Tokens
-
-### `POST /api/v1/sdk-tokens`
-Generate a new long-lived SDK token. Raw value returned once only — not stored in plaintext. 🔒 JWT
-
-**Request**
-```json
-{
-  "name": "production"
-}
-```
-**Response `201`**
-```json
-{
-  "id": "...",
-  "name": "production",
-  "token": "tw-abc123...",
-  "created_at": "..."
-}
-```
-> ⚠️ `token` is only returned here. Copy it now — it cannot be retrieved again.
-
----
-
-### `GET /api/v1/sdk-tokens`
-List all SDK tokens for the authenticated user. Raw tokens never returned. 🔒 JWT
+**Query params:** `regenerate` (bool, optional, default `false`)
 
 **Response `200`**
 ```json
-[
-  {
-    "id": "...",
-    "name": "production",
-    "created_at": "...",
-    "last_used_at": "..."
-  }
-]
+{ "sdk_token": "..." }
 ```
 
----
-
-### `DELETE /api/v1/sdk-tokens/{token_id}`
-Revoke an SDK token immediately. Any SDK using it will stop being able to ingest data. 🔒 JWT
-
-**Response `204`** — No content.
+Calling without `regenerate` returns the same token. Pass `?regenerate=true` to rotate.
 
 ---
 
-## Usage Ingestion (SDK → TokenGauge)
+## Usage (`/usage`) 🔒
 
-### `POST /usage`
-Ingest a single usage record from the SDK. 🗝️ SDK Token
+All usage endpoints require authentication.
 
-This endpoint is called automatically by the SDK after every API response. Not intended for direct use.
+### `POST /usage/`
+Log a new API call usage record.
 
 **Request**
 ```json
@@ -179,59 +179,44 @@ This endpoint is called automatically by the SDK after every API response. Not i
   "app_tag": "my-app"
 }
 ```
+- `app_tag` is optional.
+
 **Response `200`**
 ```json
 {
   "id": "...",
+  "user_id": "...",
   "provider": "openai",
   "model": "gpt-4o-mini",
   "tokens_in": 512,
   "tokens_out": 128,
   "cost_usd": 0.000102,
   "latency_ms": 340,
+  "app_tag": "my-app",
   "timestamp": "..."
 }
 ```
 
+**Errors:** `401` unauthenticated, `422` validation error.
+
 ---
 
-## Usage (Dashboard Queries)
-
-### `GET /usage`
-Query raw usage records. 🔒 JWT
+### `GET /usage/`
+List raw usage records (paginated, sorted newest-first). Users only see their own records.
 
 **Query params**
-| Param | Type | Description |
-|-------|------|-------------|
-| `start` | ISO datetime | Start of date range |
-| `end` | ISO datetime | End of date range |
-| `provider` | string | Filter by provider |
-| `model` | string | Filter by model |
-| `app_tag` | string | Filter by app tag |
-| `limit` | int | Max records (default 100) |
-| `skip` | int | Pagination offset |
 
-**Response `200`**
-```json
-[
-  {
-    "id": "...",
-    "provider": "openai",
-    "model": "gpt-4o-mini",
-    "tokens_in": 512,
-    "tokens_out": 128,
-    "cost_usd": 0.000102,
-    "latency_ms": 340,
-    "app_tag": "my-app",
-    "timestamp": "..."
-  }
-]
-```
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `limit` | int | 100 | Max records to return |
+| `skip` | int | 0 | Pagination offset |
+
+**Response `200`** — Array of usage record objects.
 
 ---
 
 ### `GET /usage/summary`
-Aggregated totals grouped by provider + model. 🔒 JWT
+Aggregated totals grouped by provider + model. No date filtering — covers all records.
 
 **Response `200`**
 ```json
@@ -249,90 +234,146 @@ Aggregated totals grouped by provider + model. 🔒 JWT
 
 ---
 
-## Webhooks *(Post-MVP)*
+### `DELETE /usage/{record_id}`
+Delete a specific usage record. Owner-only.
 
-### `POST /api/v1/webhooks`
-Register a webhook to receive usage events. 🔒 JWT
-
-**Request**
+**Response `200`**
 ```json
-{ "url": "https://my-app.com/hooks/tokengauge" }
-```
-**Response `201`**
-```json
-{ "id": "...", "url": "...", "created_at": "..." }
+{ "ok": true }
 ```
 
----
-
-### `GET /api/v1/webhooks`
-List registered webhooks. 🔒 JWT
+**Errors:** `403` not your record, `404` record not found, `422` invalid ID format.
 
 ---
 
-### `DELETE /api/v1/webhooks/{webhook_id}`
-Remove a webhook. 🔒 JWT — **Response `204`**
+## Dashboard (`/dashboard`) 🔒
 
----
+All dashboard endpoints require authentication. Responses are cached in Redis (60s TTL). Default date range is the last 7 days if `start_date`/`end_date` are not provided.
 
-**Webhook payload** (POST'd to registered URLs after every usage event ingested):
+### `GET /dashboard/summary`
+Aggregated stats across all usage within a date window.
+
+**Query params**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `start_date` | ISO datetime | 7 days ago | Start of range |
+| `end_date` | ISO datetime | now | End of range |
+| `provider` | string | — | Filter by provider |
+| `model` | string | — | Filter by model |
+| `app_tag` | string | — | Filter by app tag |
+
+**Response `200`**
 ```json
 {
-  "user_id": "...",
-  "provider": "openai",
-  "model": "gpt-4o-mini",
-  "tokens_in": 512,
-  "tokens_out": 128,
-  "cost_usd": 0.000102,
-  "app_tag": "my-app",
-  "timestamp": "..."
+  "total_tokens_in": 50000,
+  "total_tokens_out": 25000,
+  "total_cost_usd": 1.23,
+  "request_count": 150,
+  "avg_latency_ms": 420.5
 }
 ```
 
+Returns zeroes for all fields if no data matches the filters.
+
 ---
 
-## Alerts *(Post-MVP)*
+### `GET /dashboard/timeseries`
+Time-series data grouped by day or hour.
 
-### `GET /api/v1/alerts`
-List triggered alerts. 🔒 JWT
+**Query params**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `start_date` | ISO datetime | 7 days ago | Start of range |
+| `end_date` | ISO datetime | now | End of range |
+| `group_by` | `"day"` \| `"hour"` | `"day"` | Grouping interval |
+| `provider` | string | — | Filter by provider |
+| `model` | string | — | Filter by model |
 
 **Response `200`**
 ```json
 [
   {
-    "id": "...",
-    "type": "quota_80",
-    "triggered_at": "...",
-    "acknowledged": false
+    "date": "2026-03-07",
+    "tokens_in": 5000,
+    "tokens_out": 2500,
+    "cost_usd": 0.12,
+    "request_count": 15
   }
 ]
 ```
-Alert types: `quota_80` | `quota_100` | `spike_detected`
+
+Date format: `YYYY-MM-DD` for day, `YYYY-MM-DDTHH:00:00Z` for hour. Sorted ascending.
 
 ---
 
-### `PATCH /api/v1/alerts/{alert_id}/acknowledge`
-Acknowledge an alert. 🔒 JWT — **Response `200`** — Updated alert object.
+### `GET /dashboard/breakdown`
+Provider/model breakdown sorted by cost descending.
+
+**Query params**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `start_date` | ISO datetime | 7 days ago | Start of range |
+| `end_date` | ISO datetime | now | End of range |
+
+**Response `200`**
+```json
+[
+  {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "tokens_in": 10000,
+    "tokens_out": 5000,
+    "cost_usd": 0.85,
+    "request_count": 20
+  }
+]
+```
 
 ---
 
-## Optimizer *(Post-MVP)*
-
-### `GET /api/v1/optimizer/suggestions`
-Model suggestions with potential savings. 🔒 JWT
+### `GET /dashboard/quota`
+Daily token quota status. Uses Redis sorted sets for tracking.
 
 **Response `200`**
 ```json
 {
-  "potential_savings_usd": 3.42,
-  "suggestions": [
-    {
-      "model_used": "gpt-4o",
-      "optimal_model": "gpt-4o-mini",
-      "request_count": 80,
-      "savings_usd": 2.10,
-      "complexity_avg": 2.4
-    }
-  ]
+  "limit": 1000000,
+  "used": 42000,
+  "remaining": 958000,
+  "reset_at": 1709856000000,
+  "window_ms": 86400000
 }
 ```
+
+- `limit`: 1,000,000 tokens/day
+- `window_ms`: 24-hour sliding window (86,400,000 ms)
+- `reset_at`: Unix timestamp in ms when the window resets
+- Fail-open: if Redis is unavailable, `used` returns 0
+
+---
+
+## Endpoint Summary
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/health` | — | Health check |
+| POST | `/api/v1/auth/register` | — | Register |
+| POST | `/api/v1/auth/login` | — | Login |
+| POST | `/api/v1/auth/refresh` | — | Refresh access token |
+| POST | `/api/v1/auth/logout` | — | Logout |
+| GET | `/api/v1/auth/google` | — | Google OAuth URL |
+| GET | `/api/v1/auth/google/callback` | — | Google OAuth callback |
+| GET | `/api/v1/auth/sdk-token` | 🔒 | Get/regenerate SDK token |
+| POST | `/usage/` | 🔒 | Log usage record |
+| GET | `/usage/` | 🔒 | List usage records |
+| GET | `/usage/summary` | 🔒 | Usage summary by provider+model |
+| DELETE | `/usage/{record_id}` | 🔒 | Delete usage record |
+| GET | `/dashboard/summary` | 🔒 | Aggregated stats |
+| GET | `/dashboard/timeseries` | 🔒 | Time-series data |
+| GET | `/dashboard/breakdown` | 🔒 | Provider/model breakdown |
+| GET | `/dashboard/quota` | 🔒 | Daily quota status |
+
+**Total: 16 endpoints** (6 public, 10 authenticated)

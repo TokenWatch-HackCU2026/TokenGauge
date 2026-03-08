@@ -61,7 +61,10 @@
       "Bash(docker compose ps 2>/dev/null || docker-compose ps 2>/dev/null)",
       "Bash(docker compose logs frontend 2>&1)",
       "Bash(docker compose run --rm frontend npm run dev -- --host 2>&1 | head -30)",
-      "Bash(docker compose run --rm frontend sh -c \"cat package.json | head -20\" 2>&1)"
+      "Bash(docker compose run --rm frontend sh -c \"cat package.json | head -20\" 2>&1)",
+      "Bash(cd /Users/james-vallery/Desktop/Code/HACKCU_2026/frontend && npm install -D tailwindcss@3 postcss autoprefixer tailwindcss-animate && npx tailwindcss init -p 2>&1)",
+      "Bash(npm run build 2>&1 | tail -20)",
+      "Bash(cd /Users/james-vallery/Desktop/Code/HACKCU_2026/tokenwatch-sdk && pip3 install --break-system-packages pytest 2>&1 | tail -3 && python3 -m pytest tests/test_classifier.py -v 2>&1)"
     ]
   }
 }
