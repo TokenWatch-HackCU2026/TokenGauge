@@ -29,6 +29,9 @@ class User(Document):
     # JWT refresh token invalidation
     refresh_token_hash: Optional[str] = None
 
+    # SDK token (persistent, 1 year)
+    sdk_token: Optional[str] = None
+
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
@@ -43,22 +46,6 @@ class User(Document):
             ),
         ]
 
-
-class ApiKey(Document):
-    user_id: PydanticObjectId
-    provider: str
-    label: str = ""
-    encrypted_blob: str
-    key_hint: str  # last 4 chars of the raw key
-    created_at: datetime = Field(default_factory=_utcnow)
-
-    class Settings:
-        name = "api_keys"
-        indexes = [
-            pymongo.IndexModel(
-                [("user_id", pymongo.ASCENDING), ("provider", pymongo.ASCENDING)]
-            ),
-        ]
 
 
 class ApiCall(Document):
@@ -88,16 +75,6 @@ class ApiCall(Document):
             ),
         ]
 
-
-class KeyAuditLog(Document):
-    user_id: PydanticObjectId
-    key_id: PydanticObjectId
-    request_id: str
-    action: str
-    timestamp: datetime = Field(default_factory=_utcnow)
-
-    class Settings:
-        name = "key_audit_log"
 
 
 class Alert(Document):

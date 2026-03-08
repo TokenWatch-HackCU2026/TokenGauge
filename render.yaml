@@ -1,0 +1,92 @@
+services:
+  # ── FastAPI Backend ──
+  - type: web
+    name: tokengauge-api
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: DB_NAME
+        value: tokengauge
+      - key: MONGO_URI
+        sync: false  # prompted on first deploy
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "15"
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: "7"
+      - key: REDIS_URL
+        fromService:
+          name: tokengauge-redis
+          type: redis
+          property: connectionString
+      - key: FRONTEND_URL
+        value: https://tokengauge.onrender.com
+
+  # ── Arq Background Worker ──
+  - type: worker
+    name: tokengauge-worker
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: .
+    plan: free
+    dockerCommand: python -m arq workers.worker.WorkerSettings
+    envVars:
+      - key: PYTHONPATH
+        value: /app
+      - key: MONGO_URI
+        sync: false
+      - key: DB_NAME
+        value: tokengauge
+      - key: REDIS_URL
+        fromService:
+          name: tokengauge-redis
+          type: redis
+          property: connectionString
+
+  # ── React Frontend (Static Site) ──
+  - type: web
+    name: tokengauge
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    pullRequestPreviewsEnabled: true
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=0, must-revalidate
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://tokengauge-api.onrender.com/api/*
+      - type: rewrite
+        source: /usage/*
+        destination: https://tokengauge-api.onrender.com/usage/*
+      - type: rewrite
+        source: /dashboard/*
+        destination: https://tokengauge-api.onrender.com/dashboard/*
+      - type: rewrite
+        source: /keys/*
+        destination: https://tokengauge-api.onrender.com/keys/*
+      - type: rewrite
+        source: /proxy/*
+        destination: https://tokengauge-api.onrender.com/proxy/*
+      - type: rewrite
+        source: /health
+        destination: https://tokengauge-api.onrender.com/health
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  # ── Managed Redis ──
+  - type: redis
+    name: tokengauge-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []  # only internal access

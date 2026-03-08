@@ -2,10 +2,12 @@ import os
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from auth import (
     create_access_token,
+    create_sdk_token,
+    get_current_user,
     create_refresh_token,
     decode_refresh_token,
     hash_password,
@@ -44,16 +46,26 @@ async def _issue_tokens(user: User) -> tuple[str, str]:
 
 @router.post("/register", status_code=201)
 async def register(body: RegisterRequest):
-    if await User.find_one(User.email == body.email):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
-    user = User(
-        email=body.email,
-        password_hash=hash_password(body.password),
-        full_name=body.full_name,
-    )
-    await user.insert()
-    access, refresh = await _issue_tokens(user)
-    return {"access_token": access, "refresh_token": refresh, "user": _user_out(user)}
+    print(f"[REGISTER] Received registration request for email={body.email}")
+    try:
+        if await User.find_one(User.email == body.email):
+            print(f"[REGISTER] Email already exists: {body.email}")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+        user = User(
+            email=body.email,
+            password_hash=hash_password(body.password),
+            full_name=body.full_name,
+        )
+        await user.insert()
+        print(f"[REGISTER] User created: {user.id}")
+        access, refresh = await _issue_tokens(user)
+        print(f"[REGISTER] Tokens issued for user {user.id}")
+        return {"access_token": access, "refresh_token": refresh, "user": _user_out(user)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[REGISTER] ERROR: {type(e).__name__}: {e}")
+        raise
 
 
 @router.post("/login")
@@ -146,3 +158,24 @@ async def google_callback(code: str):
 
     access, refresh = await _issue_tokens(user)
     return {"access_token": access, "refresh_token": refresh, "user": _user_out(user)}
+
+
+@router.get("/sdk-token")
+async def get_sdk_token(
+    regenerate: bool = False,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Return the user's persistent SDK token (valid 1 year).
+    Pass ?regenerate=true to rotate it and invalidate the old one.
+    """
+    from beanie import PydanticObjectId
+    user = await User.get(PydanticObjectId(current_user["user_id"]))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not user.sdk_token or regenerate:
+        user.sdk_token = create_sdk_token(current_user["user_id"], current_user["email"])
+        await user.save()
+
+    return {"sdk_token": user.sdk_token}

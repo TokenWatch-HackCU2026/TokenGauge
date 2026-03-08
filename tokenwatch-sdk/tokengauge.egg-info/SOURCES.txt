@@ -1,0 +1,9 @@
+README.md
+pyproject.toml
+tokengauge/__init__.py
+tokengauge/_tracker.py
+tokengauge.egg-info/PKG-INFO
+tokengauge.egg-info/SOURCES.txt
+tokengauge.egg-info/dependency_links.txt
+tokengauge.egg-info/requires.txt
+tokengauge.egg-info/top_level.txt

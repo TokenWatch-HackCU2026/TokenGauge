@@ -7,7 +7,7 @@ import {
 import {
   fetchRecords, fetchSummary, fetchDashboardSummary,
   fetchTimeseries, fetchBreakdown, fetchQuota,
-  fetchKeys, addKey, deleteKey,
+  fetchSdkToken, regenerateSdkToken,
   ApiCall, ApiCallSummary, TimeseriesPoint, BreakdownRow, UserOut,
 } from "../api/client";
 
@@ -44,12 +44,11 @@ function rangeToParams(range: string) {
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Page = "overview" | "usage" | "keys" | "settings";
+type Page = "overview" | "usage" | "settings";
 
 const NAV_ITEMS: { id: Page; icon: string; label: string }[] = [
   { id: "overview", icon: "◈", label: "Overview" },
   { id: "usage", icon: "◉", label: "Usage" },
-  { id: "keys", icon: "◆", label: "API Keys" },
   { id: "settings", icon: "◎", label: "Settings" },
 ];
 
@@ -165,7 +164,6 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
             <OverviewPage summary={summary} records={records} timeseries={timeseries} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} />
           )}
           {page === "usage" && <UsagePage summary={summary} records={records} loading={isLoading} />}
-          {page === "keys" && <KeysPage />}
           {page === "settings" && <SettingsPage quota={quota} />}
         </div>
       </main>
@@ -306,119 +304,62 @@ function UsagePage({ summary, records, loading }: { summary: ApiCallSummary[]; r
 }
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
-function KeysPage() {
-  const qc = useQueryClient();
-  const [showAdd, setShowAdd] = useState(false);
-  const [newProvider, setNewProvider] = useState("openai");
-  const [newLabel, setNewLabel] = useState("");
-  const [newApiKey, setNewApiKey] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
-
-  const { data: keys = [], isLoading } = useQuery({
-    queryKey: ["keys"],
-    queryFn: fetchKeys,
-  });
-
-  const addMutation = useMutation({
-    mutationFn: () => addKey(newProvider, newApiKey, newLabel || newProvider),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["keys"] });
-      setNewLabel("");
-      setNewApiKey("");
-      setShowAdd(false);
-      setFormError(null);
-    },
-    onError: (err: Error) => setFormError(err.message),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteKey(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["keys"] }),
-  });
-
-  function handleAdd() {
-    setFormError(null);
-    if (!newApiKey || newApiKey.length < 4) { setFormError("API key must be at least 4 characters"); return; }
-    addMutation.mutate();
-  }
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
-        <p style={{ margin: 0, color: C.muted, fontSize: "0.9rem" }}>Manage your AI provider keys. Keys are encrypted with AES-256 via GCP KMS.</p>
-        <button onClick={() => { setShowAdd(v => !v); setFormError(null); }} style={btnStyle(C.accent)}>+ Add key</button>
-      </div>
-
-      {showAdd && (
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1.25rem", marginBottom: "1.25rem" }}>
-          <div style={{ fontWeight: 600, marginBottom: "1rem" }}>Register new key</div>
-          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-            <select
-              value={newProvider}
-              onChange={e => setNewProvider(e.target.value)}
-              style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.5rem 0.75rem", fontSize: "0.9rem" }}
-            >
-              {["openai", "anthropic", "google", "mistral"].map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-            <input
-              placeholder="Label (e.g. Production)"
-              value={newLabel}
-              onChange={e => setNewLabel(e.target.value)}
-              style={{ flex: 1, minWidth: 160, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.5rem 0.75rem", fontSize: "0.9rem" }}
-            />
-            <input
-              placeholder="Paste your API key"
-              type="password"
-              value={newApiKey}
-              onChange={e => setNewApiKey(e.target.value)}
-              style={{ flex: 2, minWidth: 200, background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.5rem 0.75rem", fontSize: "0.9rem" }}
-            />
-            <button onClick={handleAdd} disabled={addMutation.isPending} style={btnStyle(C.accent)}>
-              {addMutation.isPending ? "Saving…" : "Save"}
-            </button>
-            <button onClick={() => { setShowAdd(false); setFormError(null); }} style={btnStyle(C.muted)}>Cancel</button>
-          </div>
-          {formError && <p style={{ margin: "0.5rem 0 0", fontSize: "0.82rem", color: C.red }}>{formError}</p>}
-          <p style={{ margin: "0.75rem 0 0", fontSize: "0.8rem", color: C.muted }}>Raw keys are never stored. Only an encrypted blob + last-4 hint is persisted.</p>
-        </div>
-      )}
-
-      {isLoading && <EmptyState label="Loading keys…" />}
-
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-        {keys.map(key => (
-          <div key={key.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1rem 1.25rem", display: "flex", alignItems: "center", gap: "1rem" }}>
-            <ProviderBadge provider={key.provider} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{key.label}</div>
-              <div style={{ color: C.muted, fontSize: "0.8rem", fontFamily: "monospace", marginTop: 2 }}>{key.key_hint}</div>
-            </div>
-            <div style={{ color: C.muted, fontSize: "0.8rem" }}>
-              Added {new Date(key.created_at).toLocaleDateString()}
-            </div>
-            <Pill color={C.green}>Active</Pill>
-            <button
-              onClick={() => deleteMutation.mutate(key.id)}
-              disabled={deleteMutation.isPending}
-              style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.red, borderRadius: 8, padding: "0.35rem 0.75rem", cursor: "pointer", fontSize: "0.8rem" }}
-            >
-              Revoke
-            </button>
-          </div>
-        ))}
-        {!isLoading && keys.length === 0 && <EmptyState label="No keys registered yet. Add one above." />}
-      </div>
-    </div>
-  );
-}
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 function SettingsPage({ quota }: { quota: { limit: number; used: number; remaining: number; reset_at: number; window_ms: number } | undefined }) {
   const pct = quota ? Math.round((quota.used / quota.limit) * 100) : 0;
   const resetAt = quota ? new Date(quota.reset_at).toLocaleTimeString() : "—";
+  const [sdkToken, setSdkToken] = useState<string | null>(null);
+  const [sdkCopied, setSdkCopied] = useState(false);
+  const [sdkLoading, setSdkLoading] = useState(false);
+
+  // Auto-load existing token on mount
+  useState(() => { fetchSdkToken().then(r => setSdkToken(r.sdk_token)).catch(() => {}); });
+
+  async function handleRegenerate() {
+    if (!confirm("Regenerate SDK token? Your old token will stop working.")) return;
+    setSdkLoading(true);
+    try {
+      const res = await regenerateSdkToken();
+      setSdkToken(res.sdk_token);
+    } finally {
+      setSdkLoading(false);
+    }
+  }
+
+  function handleCopy() {
+    if (!sdkToken) return;
+    navigator.clipboard.writeText(sdkToken);
+    setSdkCopied(true);
+    setTimeout(() => setSdkCopied(false), 2000);
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem", maxWidth: 560 }}>
+      <Card title="SDK Token" subtitle="Use this token with the tokenwatch-sdk package (valid 1 year)">
+        <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          <p style={{ margin: 0, fontSize: "0.85rem", color: C.subtle }}>
+            Install: <code style={{ background: C.bg, padding: "2px 6px", borderRadius: 4 }}>pip install tokenwatch-sdk</code>
+          </p>
+          {sdkToken && (
+            <div style={{ fontFamily: "monospace", fontSize: "0.78rem", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.6rem 0.8rem", wordBreak: "break-all", color: C.subtle }}>
+              {sdkToken}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button onClick={handleCopy} disabled={!sdkToken} style={{ ...btnStyle(sdkCopied ? C.green : C.accent) }}>
+              {sdkCopied ? "Copied!" : "Copy token"}
+            </button>
+            <button onClick={handleRegenerate} disabled={sdkLoading} style={{ ...btnStyle(C.muted) }}>
+              {sdkLoading ? "Rotating…" : "Regenerate"}
+            </button>
+          </div>
+          <p style={{ margin: 0, fontSize: "0.8rem", color: C.muted }}>
+            Use the same token across all your projects — tag them with <code style={{ background: C.bg, padding: "2px 4px", borderRadius: 3 }}>app_tag</code> to tell them apart.
+          </p>
+        </div>
+      </Card>
+
       <Card title="Rate limit quota" subtitle={`Resets at ${resetAt}`}>
         <div style={{ marginTop: "0.75rem" }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", marginBottom: "0.4rem" }}>

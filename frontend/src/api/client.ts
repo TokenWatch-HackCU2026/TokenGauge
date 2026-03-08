@@ -24,7 +24,9 @@ async function refreshAccessToken(): Promise<boolean> {
 }
 
 async function get<T>(path: string): Promise<T> {
+  console.log(`[API] GET ${BASE + path}`);
   let res = await fetch(BASE + path, { headers: authHeaders() });
+  console.log(`[API] GET ${BASE + path} → ${res.status} ${res.statusText}`);
   if (res.status === 401) {
     const ok = await refreshAccessToken();
     if (ok) res = await fetch(BASE + path, { headers: authHeaders() });
@@ -34,11 +36,14 @@ async function get<T>(path: string): Promise<T> {
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  let res = await fetch(BASE + path, {
+  const url = BASE + path;
+  console.log(`[API] POST ${url}`, body);
+  let res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
   });
+  console.log(`[API] POST ${url} → ${res.status} ${res.statusText}`);
   if (res.status === 401 && path !== "/api/v1/auth/refresh") {
     const ok = await refreshAccessToken();
     if (ok) {
@@ -156,19 +161,6 @@ export function fetchSummary(): Promise<ApiCallSummary[]> {
   return get("/usage/summary");
 }
 
-export async function logUsage(record: Omit<ApiCall, "id" | "user_id" | "timestamp">): Promise<ApiCall> {
-  const res = await fetch(`${BASE}/usage/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify(record),
-  });
-  return res.json();
-}
-
-export async function deleteRecord(id: string): Promise<void> {
-  return del(`/usage/${id}`);
-}
-
 // ── Dashboard endpoints ───────────────────────────────────────────────────────
 
 export interface SummaryParams {
@@ -207,33 +199,10 @@ export function fetchQuota(): Promise<QuotaOut> {
   return get("/dashboard/quota");
 }
 
-// ── Key vault endpoints ───────────────────────────────────────────────────────
-
-export interface ApiKeyOut {
-  id: string;
-  provider: string;
-  label: string;
-  key_hint: string;
-  created_at: string;
+export function fetchSdkToken(): Promise<{ sdk_token: string }> {
+  return get("/api/v1/auth/sdk-token");
 }
 
-export function fetchKeys(): Promise<ApiKeyOut[]> {
-  return get("/keys/");
-}
-
-export function addKey(provider: string, api_key: string, label: string): Promise<ApiKeyOut> {
-  return post("/keys/", { provider, api_key, label });
-}
-
-async function del(path: string): Promise<void> {
-  let res = await fetch(BASE + path, { method: "DELETE", headers: authHeaders() });
-  if (res.status === 401) {
-    const ok = await refreshAccessToken();
-    if (ok) res = await fetch(BASE + path, { method: "DELETE", headers: authHeaders() });
-  }
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-}
-
-export async function deleteKey(id: string): Promise<void> {
-  return del(`/keys/${id}`);
+export function regenerateSdkToken(): Promise<{ sdk_token: string }> {
+  return get("/api/v1/auth/sdk-token?regenerate=true");
 }

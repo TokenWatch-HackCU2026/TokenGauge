@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import connect_db, disconnect_db
-from routers import auth, usage, dashboard, keys, proxy
+from routers import auth, usage, dashboard
 
 
 @asynccontextmanager
@@ -15,7 +15,13 @@ async def lifespan(app: FastAPI):
     await disconnect_db()
 
 
-app = FastAPI(title="TokenWatch API", lifespan=lifespan)
+app = FastAPI(title="TokenGauge API", lifespan=lifespan)
+
+allowed_origins = [
+    "http://localhost:5173",
+]
+if os.getenv("FRONTEND_URL"):
+    allowed_origins.append(os.getenv("FRONTEND_URL"))
 
 allowed_origins = [
     "http://localhost:5173",
@@ -34,8 +40,6 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(usage.router)
 app.include_router(dashboard.router)
-app.include_router(keys.router)
-app.include_router(proxy.router)
 
 
 @app.get("/health")

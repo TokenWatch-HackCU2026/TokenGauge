@@ -34,6 +34,13 @@ def create_access_token(user_id: str, email: str) -> str:
     return jwt.encode(payload, os.environ["JWT_SECRET"], algorithm="HS256")
 
 
+def create_sdk_token(user_id: str, email: str) -> str:
+    """Long-lived token (1 year) for SDK use. Validated by get_current_user."""
+    expire = datetime.now(timezone.utc) + timedelta(days=365)
+    payload = {"sub": user_id, "email": email, "exp": expire, "type": "sdk"}
+    return jwt.encode(payload, os.environ["JWT_SECRET"], algorithm="HS256")
+
+
 def create_refresh_token(user_id: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     payload = {"sub": user_id, "exp": expire, "type": "refresh"}
