@@ -145,33 +145,63 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
 
 // ─── Chart helpers ─────────────────────────────────────────────────────────────
 
-function bucketKey(ts: string, range: string): string {
-  const d = new Date(ts);
-  if (range === "24h") {
-    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:00`;
+type Granularity = "hour" | "day" | "week" | "month";
+
+// Returns { sort: sortable ISO-ish key, label: human-friendly display } in browser local time
+function bucketInfo(ts: string, gran: Granularity): { sort: string; label: string } {
+  const d = new Date(ts); // UTC string → local Date
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const Y = d.getFullYear(), M = d.getMonth(), D = d.getDate(), H = d.getHours();
+
+  switch (gran) {
+    case "hour":
+      return {
+        sort: `${Y}-${pad(M+1)}-${pad(D)}T${pad(H)}`,
+        label: `${M+1}/${D} ${pad(H)}:00`,
+      };
+    case "day":
+      return {
+        sort: `${Y}-${pad(M+1)}-${pad(D)}`,
+        label: `${M+1}/${D}`,
+      };
+    case "week": {
+      const dow = d.getDay();
+      const mon = new Date(d);
+      mon.setDate(D - dow + (dow === 0 ? -6 : 1));
+      const wY = mon.getFullYear(), wM = mon.getMonth(), wD = mon.getDate();
+      return {
+        sort: `${wY}-${pad(wM+1)}-${pad(wD)}`,
+        label: `Wk ${wM+1}/${wD}`,
+      };
+    }
+    case "month":
+      return {
+        sort: `${Y}-${pad(M+1)}`,
+        label: d.toLocaleString("default", { month: "short", year: "numeric" }),
+      };
   }
-  return `${d.getMonth()+1}/${d.getDate()}`;
 }
 
-// ─── Model Usage Histogram (stacked bar) ─────────────────────────────────────
+// ─── Model Usage Line Chart ──────────────────────────────────────────────────
 type UsageMetric = "cost" | "requests" | "tokens";
 
-function ModelUsageChart({ records, range }: { records: ApiCall[]; range: string }) {
+function ModelUsageChart({ records }: { records: ApiCall[] }) {
   const [metric, setMetric] = useState<UsageMetric>("cost");
+  const [gran, setGran] = useState<Granularity>("day");
   const [selected, setSelected] = useState<string | null>(null);
 
-  // Bucket records by date × model
-  const buckets: Record<string, Record<string, number>> = {};
+  // Bucket records by time × model (local timezone)
+  const buckets: Record<string, { label: string; values: Record<string, number> }> = {};
   const models = new Set<string>();
   for (const r of records) {
-    const bk = bucketKey(r.timestamp, range);
+    const { sort, label } = bucketInfo(r.timestamp, gran);
     models.add(r.model);
-    if (!buckets[bk]) buckets[bk] = {};
+    if (!buckets[sort]) buckets[sort] = { label, values: {} };
     const val = metric === "cost" ? r.cost_usd : metric === "requests" ? 1 : r.tokens_in + r.tokens_out;
-    buckets[bk][r.model] = (buckets[bk][r.model] ?? 0) + val;
+    buckets[sort].values[r.model] = (buckets[sort].values[r.model] ?? 0) + val;
   }
-  const sortedBuckets = Object.keys(buckets).sort();
-  const data = sortedBuckets.map(bk => ({ date: bk, ...buckets[bk] }));
+  const sortedKeys = Object.keys(buckets).sort();
+  const data = sortedKeys.map(k => ({ date: buckets[k].label, ...buckets[k].values }));
   const modelList = Array.from(models);
 
   const subtitles: Record<UsageMetric, string> = { cost: "USD per period", requests: "Requests per period", tokens: "Tokens per period" };
@@ -192,7 +222,21 @@ function ModelUsageChart({ records, range }: { records: ApiCall[]; range: string
     <Card
       title="Model usage over time"
       subtitle={subtitles[metric]}
-      action={<div style={{ display: "flex", gap: 4 }}>{toggleBtn("Cost","cost")}{toggleBtn("Requests","requests")}{toggleBtn("Tokens","tokens")}</div>}
+      action={
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          {toggleBtn("Cost","cost")}{toggleBtn("Requests","requests")}{toggleBtn("Tokens","tokens")}
+          <select
+            value={gran}
+            onChange={e => setGran(e.target.value as Granularity)}
+            style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: "0.25rem 0.5rem", fontSize: "0.75rem", cursor: "pointer" }}
+          >
+            <option value="hour">Hourly</option>
+            <option value="day">Daily</option>
+            <option value="week">Weekly</option>
+            <option value="month">Monthly</option>
+          </select>
+        </div>
+      }
     >
       {data.length === 0 ? <EmptyState label="No data for this period" /> : (
         <>
@@ -276,7 +320,7 @@ function OverviewPage({ summary, records, breakdown, dashSummary, loading, range
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem", marginBottom: "1.5rem" }}>
-        <ModelUsageChart records={records} range={range} />
+        <ModelUsageChart records={records} />
         <CostPieChart breakdown={breakdown} />
       </div>
 
