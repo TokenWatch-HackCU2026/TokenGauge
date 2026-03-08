@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -8,6 +8,7 @@ import {
   fetchRecords, fetchSummary, fetchDashboardSummary,
   fetchBreakdown, fetchQuota,
   fetchSdkToken, regenerateSdkToken, recalculateCosts, updatePhone,
+  createLiveSocket,
   ApiCall, ApiCallSummary, BreakdownRow, UserOut,
 } from "../api/client";
 import { C, PROVIDER_COLORS, PIE_COLORS, LINE_COLORS, GaugeLogo } from "../theme";
@@ -54,6 +55,30 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
     queryKey: ["quota"],
     queryFn: fetchQuota,
   });
+
+  // ── Live WebSocket ───────────────────────────────────────────────────────────
+  const [liveRecords, setLiveRecords] = useState<ApiCall[]>([]);
+  const [isLive, setIsLive] = useState(false);
+
+  useEffect(() => {
+    const ws = createLiveSocket((newRecs) => {
+      setLiveRecords(prev => {
+        const existingIds = new Set(prev.map(r => r.id));
+        const fresh = newRecs.filter(r => !existingIds.has(r.id));
+        return [...fresh, ...prev].slice(0, 200);
+      });
+    });
+    ws.onopen = () => setIsLive(true);
+    ws.onclose = () => setIsLive(false);
+    ws.onerror = () => setIsLive(false);
+    return () => ws.close();
+  }, []);
+
+  // Merge live records with fetched, deduplicated, newest first
+  const allRecords = [...liveRecords, ...records].reduce<ApiCall[]>((acc, r) => {
+    if (!acc.find(x => x.id === r.id)) acc.push(r);
+    return acc;
+  }, []);
 
   return (
     <div style={{ display: "flex", height: "100vh", background: C.bg, color: C.text, fontFamily: "'Inter', system-ui, sans-serif", overflow: "hidden" }}>
@@ -127,15 +152,15 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
               <option value="7d">Last 7 days</option>
               <option value="30d">Last 30 days</option>
             </select>
-            <Pill color={C.green}>● Live</Pill>
+            <Pill color={isLive ? C.green : C.muted}>{isLive ? "● Live" : "○ Connecting…"}</Pill>
           </div>
         </header>
 
         <div style={{ flex: 1, padding: "1.75rem 2rem", overflow: "auto" }}>
           {page === "overview" && (
-            <OverviewPage summary={summary} records={records} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} range={range} />
+            <OverviewPage summary={summary} records={allRecords} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} range={range} />
           )}
-          {page === "usage" && <UsagePage summary={summary} records={records} loading={isLoading} />}
+          {page === "usage" && <UsagePage summary={summary} records={allRecords} loading={isLoading} />}
           {page === "settings" && <SettingsPage quota={quota} user={user} />}
         </div>
       </main>
@@ -558,7 +583,7 @@ function RequestsTable({ records }: { records: ApiCall[] }) {
         <tbody>
           {records.map(r => (
             <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-              <td style={tdStyle}>{new Date(r.timestamp).toLocaleString()}</td>
+              <td style={tdStyle}>{new Date(r.timestamp).toLocaleString(undefined, { timeZoneName: 'short' })}</td>
               <td style={tdStyle}><ProviderBadge provider={r.provider} small /></td>
               <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: "0.8rem" }}>{r.model}</td>
               <td style={{ ...tdStyle, color: C.muted }}>{r.app_tag ?? "—"}</td>

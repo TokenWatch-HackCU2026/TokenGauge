@@ -240,3 +240,16 @@ export function regenerateSdkToken(): Promise<{ sdk_token: string }> {
 export function recalculateCosts(): Promise<{ recalculated: number }> {
   return post("/usage/recalculate-costs", {});
 }
+
+// ── Live WebSocket ─────────────────────────────────────────────────────────────
+
+export function createLiveSocket(onRecords: (records: ApiCall[]) => void): WebSocket {
+  const token = localStorage.getItem("access_token") ?? "";
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${window.location.host}/usage/ws/live?token=${encodeURIComponent(token)}`);
+  ws.onmessage = (e) => {
+    const records: ApiCall[] = JSON.parse(e.data);
+    onRecords(records);
+  };
+  return ws;
+}
