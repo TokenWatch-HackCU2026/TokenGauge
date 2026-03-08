@@ -65,7 +65,10 @@ router = APIRouter(prefix="/usage", tags=["usage"])
 @router.post("/", response_model=ApiCallOut)
 async def log_usage(record: ApiCallCreate, current_user: dict = Depends(get_current_user)):
     uid = PydanticObjectId(current_user["user_id"])
-    doc = ApiCall(user_id=uid, **record.model_dump())
+    data = record.model_dump()
+    if not data.get("cost_usd"):
+        data["cost_usd"] = _calc_cost(data["model"], data.get("tokens_in", 0), data.get("tokens_out", 0))
+    doc = ApiCall(user_id=uid, **data)
     await doc.insert()
     return _to_out(doc)
 
