@@ -1,7 +1,7 @@
 import asyncio
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List
 
 from beanie import PydanticObjectId
@@ -66,6 +66,9 @@ def _calc_cost(model: str, tokens_in: int, tokens_out: int) -> float:
 
 router = APIRouter(prefix="/usage", tags=["usage"])
 
+# In-memory queues for instant WebSocket push (one queue per connected user)
+_live_queues: dict[str, asyncio.Queue] = {}
+
 
 @router.post("/", response_model=ApiCallOut)
 async def log_usage(record: ApiCallCreate, current_user: dict = Depends(get_current_user)):
@@ -75,7 +78,12 @@ async def log_usage(record: ApiCallCreate, current_user: dict = Depends(get_curr
         data["cost_usd"] = _calc_cost(data["model"], data.get("tokens_in", 0), data.get("tokens_out", 0))
     doc = ApiCall(user_id=uid, **data)
     await doc.insert()
-    return _to_out(doc)
+    out = _to_out(doc)
+    # Instantly push to any open WebSocket for this user
+    uid_str = str(uid)
+    if uid_str in _live_queues:
+        await _live_queues[uid_str].put(out)
+    return out
 
 
 @router.get("/", response_model=List[ApiCallOut])
@@ -150,7 +158,7 @@ async def recalculate_costs(current_user: dict = Depends(get_current_user)):
 
 @router.websocket("/ws/live")
 async def live_usage(websocket: WebSocket, token: str):
-    """Push new records to the client every 2 s without polling from the browser."""
+    """Push new records instantly via in-process queue, with 30s keep-alive pings."""
     try:
         payload = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=["HS256"])
         uid = PydanticObjectId(payload["sub"])
@@ -159,36 +167,21 @@ async def live_usage(websocket: WebSocket, token: str):
         return
 
     await websocket.accept()
-    last_seen = datetime.now(timezone.utc)
-    ping_counter = 0
+    uid_str = str(uid)
+    queue: asyncio.Queue = asyncio.Queue()
+    _live_queues[uid_str] = queue
 
     try:
         while True:
-            await asyncio.sleep(1)
-            ping_counter += 1
             try:
-                new_docs = (
-                    await ApiCall.find(
-                        ApiCall.user_id == uid,
-                        {"timestamp": {"$gt": last_seen}},
-                    )
-                    .sort(-ApiCall.timestamp)
-                    .to_list()
-                )
-                if new_docs:
-                    last_seen = new_docs[0].timestamp
-                    await websocket.send_text(
-                        json.dumps([_to_out(d).model_dump(mode="json") for d in new_docs])
-                    )
-                elif ping_counter % 30 == 0:
-                    # Send a keep-alive ping every 30s to prevent Render proxy timeout
-                    await websocket.send_text("[]")
-            except WebSocketDisconnect:
-                raise
-            except Exception:
-                pass  # keep the loop running on transient DB/serialization errors
+                out = await asyncio.wait_for(queue.get(), timeout=30.0)
+                await websocket.send_text(json.dumps([out.model_dump(mode="json")]))
+            except asyncio.TimeoutError:
+                await websocket.send_text("[]")  # keep-alive ping
     except WebSocketDisconnect:
         pass
+    finally:
+        _live_queues.pop(uid_str, None)
 
 
 def _to_out(doc: ApiCall) -> ApiCallOut:
