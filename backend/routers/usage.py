@@ -1,9 +1,14 @@
+import asyncio
+import json
+import os
+from datetime import datetime
 from typing import List
 
 from beanie import PydanticObjectId
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from jose import JWTError, jwt
 
 from auth import get_current_user
 from database import get_db
@@ -61,6 +66,9 @@ def _calc_cost(model: str, tokens_in: int, tokens_out: int) -> float:
 
 router = APIRouter(prefix="/usage", tags=["usage"])
 
+# In-memory queues for instant WebSocket push (one queue per connected user)
+_live_queues: dict[str, asyncio.Queue] = {}
+
 
 @router.post("/", response_model=ApiCallOut)
 async def log_usage(record: ApiCallCreate, current_user: dict = Depends(get_current_user)):
@@ -70,7 +78,12 @@ async def log_usage(record: ApiCallCreate, current_user: dict = Depends(get_curr
         data["cost_usd"] = _calc_cost(data["model"], data.get("tokens_in", 0), data.get("tokens_out", 0))
     doc = ApiCall(user_id=uid, **data)
     await doc.insert()
-    return _to_out(doc)
+    out = _to_out(doc)
+    # Instantly push to any open WebSocket for this user
+    uid_str = str(uid)
+    if uid_str in _live_queues:
+        await _live_queues[uid_str].put(out)
+    return out
 
 
 @router.get("/", response_model=List[ApiCallOut])
@@ -166,6 +179,34 @@ async def recalculate_costs(current_user: dict = Depends(get_current_user)):
             await doc.save()
             updated += 1
     return {"recalculated": updated}
+
+
+@router.websocket("/ws/live")
+async def live_usage(websocket: WebSocket, token: str):
+    """Push new records instantly via in-process queue, with 30s keep-alive pings."""
+    try:
+        payload = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=["HS256"])
+        uid = PydanticObjectId(payload["sub"])
+    except (JWTError, Exception):
+        await websocket.close(code=4001)
+        return
+
+    await websocket.accept()
+    uid_str = str(uid)
+    queue: asyncio.Queue = asyncio.Queue()
+    _live_queues[uid_str] = queue
+
+    try:
+        while True:
+            try:
+                out = await asyncio.wait_for(queue.get(), timeout=30.0)
+                await websocket.send_text(json.dumps([out.model_dump(mode="json")]))
+            except asyncio.TimeoutError:
+                await websocket.send_text("[]")  # keep-alive ping
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _live_queues.pop(uid_str, None)
 
 
 def _to_out(doc: ApiCall, cost_flag: str | None = None) -> ApiCallOut:
