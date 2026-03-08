@@ -14,10 +14,35 @@ import {
 import { C, PROVIDER_COLORS, PIE_COLORS, LINE_COLORS, GaugeLogo } from "../theme";
 
 // ─── Date range helpers ───────────────────────────────────────────────────────
-function rangeToParams(range: string) {
+type Range = "live" | "1D" | "1W" | "1M" | "3M" | "YTD" | "1Y" | "ALL";
+const RANGES: Range[] = ["live", "1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"];
+
+function rangeToParams(range: Range) {
   const now = new Date();
-  const ms = range === "24h" ? 86_400_000 : range === "7d" ? 7 * 86_400_000 : 30 * 86_400_000;
-  return { startDate: new Date(now.getTime() - ms).toISOString(), endDate: now.toISOString() };
+  const ms: Record<Range, number | null> = {
+    live: 3_600_000,
+    "1D": 86_400_000,
+    "1W": 7 * 86_400_000,
+    "1M": 30 * 86_400_000,
+    "3M": 90 * 86_400_000,
+    YTD: now.getTime() - new Date(now.getFullYear(), 0, 1).getTime(),
+    "1Y": 365 * 86_400_000,
+    ALL: null,
+  };
+  const offset = ms[range];
+  if (offset === null) return {};
+  return { startDate: new Date(now.getTime() - offset).toISOString(), endDate: now.toISOString() };
+}
+
+// Auto-pick chart granularity from range
+function rangeToGranularity(range: Range): "hour" | "day" | "week" | "month" {
+  switch (range) {
+    case "live": case "1D": return "hour";
+    case "1W": return "day";
+    case "1M": case "3M": return "day";
+    case "YTD": case "1Y": return "week";
+    case "ALL": return "month";
+  }
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -32,8 +57,9 @@ const NAV_ITEMS: { id: Page; icon: string; label: string }[] = [
 // ─── Root ─────────────────────────────────────────────────────────────────────
 export default function Dashboard({ onLogout, user }: { onLogout?: () => void; user?: UserOut | null }) {
   const [page, setPage] = useState<Page>("overview");
-  const [range, setRange] = useState("7d");
+  const [range, setRange] = useState<Range>("1W");
   const params = rangeToParams(range);
+  const gran = rangeToGranularity(range);
 
   const { data: dashSummary } = useQuery({
     queryKey: ["dashboard-summary", range],
@@ -143,22 +169,34 @@ export default function Dashboard({ onLogout, user }: { onLogout?: () => void; u
             {NAV_ITEMS.find(n => n.id === page)?.label}
           </h1>
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-            <select
-              value={range}
-              onChange={e => setRange(e.target.value)}
-              style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0.4rem 0.75rem", fontSize: "0.85rem", cursor: "pointer" }}
-            >
-              <option value="24h">Last 24h</option>
-              <option value="7d">Last 7 days</option>
-              <option value="30d">Last 30 days</option>
-            </select>
+            <div style={{ display: "flex", alignItems: "center", gap: 2, background: C.bg, borderRadius: 8, padding: 3 }}>
+              {RANGES.map(r => (
+                <button
+                  key={r}
+                  onClick={() => setRange(r)}
+                  style={{
+                    background: range === r ? C.accent : "transparent",
+                    color: range === r ? "#fff" : C.muted,
+                    border: "none",
+                    borderRadius: 6,
+                    padding: "0.35rem 0.7rem",
+                    fontSize: "0.78rem",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    transition: "all 0.12s",
+                  }}
+                >
+                  {r === "live" ? "Live" : r}
+                </button>
+              ))}
+            </div>
             <Pill color={isLive ? C.green : C.muted}>{isLive ? "● Live" : "○ Connecting…"}</Pill>
           </div>
         </header>
 
         <div style={{ flex: 1, padding: "1.75rem 2rem", overflow: "auto" }}>
           {page === "overview" && (
-            <OverviewPage summary={summary} records={allRecords} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} range={range} />
+            <OverviewPage summary={summary} records={allRecords} breakdown={breakdown} dashSummary={dashSummary} loading={isLoading} gran={gran} />
           )}
           {page === "usage" && <UsagePage summary={summary} records={allRecords} loading={isLoading} />}
           {page === "settings" && <SettingsPage quota={quota} user={user} />}
@@ -210,9 +248,8 @@ function bucketInfo(ts: string, gran: Granularity): { sort: string; label: strin
 // ─── Model Usage Line Chart ──────────────────────────────────────────────────
 type UsageMetric = "cost" | "requests" | "tokens";
 
-function ModelUsageChart({ records }: { records: ApiCall[] }) {
+function ModelUsageChart({ records, gran }: { records: ApiCall[]; gran: Granularity }) {
   const [metric, setMetric] = useState<UsageMetric>("cost");
-  const [gran, setGran] = useState<Granularity>("day");
   const [selected, setSelected] = useState<string | null>(null);
 
   // Bucket records by time × model (local timezone)
@@ -247,21 +284,7 @@ function ModelUsageChart({ records }: { records: ApiCall[] }) {
     <Card
       title="Model usage over time"
       subtitle={subtitles[metric]}
-      action={
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-          {toggleBtn("Cost","cost")}{toggleBtn("Requests","requests")}{toggleBtn("Tokens","tokens")}
-          <select
-            value={gran}
-            onChange={e => setGran(e.target.value as Granularity)}
-            style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: "0.25rem 0.5rem", fontSize: "0.75rem", cursor: "pointer" }}
-          >
-            <option value="hour">Hourly</option>
-            <option value="day">Daily</option>
-            <option value="week">Weekly</option>
-            <option value="month">Monthly</option>
-          </select>
-        </div>
-      }
+      action={<div style={{ display: "flex", gap: 4 }}>{toggleBtn("Cost","cost")}{toggleBtn("Requests","requests")}{toggleBtn("Tokens","tokens")}</div>}
     >
       {data.length === 0 ? <EmptyState label="No data for this period" /> : (
         <>
@@ -327,13 +350,13 @@ function CostPieChart({ breakdown }: { breakdown: BreakdownRow[] }) {
 }
 
 // ─── Overview ─────────────────────────────────────────────────────────────────
-function OverviewPage({ summary, records, breakdown, dashSummary, loading, range }: {
+function OverviewPage({ summary, records, breakdown, dashSummary, loading, gran }: {
   summary: ApiCallSummary[];
   records: ApiCall[];
   breakdown: BreakdownRow[];
   dashSummary: { total_tokens_in: number; total_tokens_out: number; total_cost_usd: number; request_count: number; avg_latency_ms: number } | undefined;
   loading: boolean;
-  range: string;
+  gran: Granularity;
 }) {
   return (
     <div>
@@ -345,7 +368,7 @@ function OverviewPage({ summary, records, breakdown, dashSummary, loading, range
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem", marginBottom: "1.5rem" }}>
-        <ModelUsageChart records={records} />
+        <ModelUsageChart records={records} gran={gran} />
         <CostPieChart breakdown={breakdown} />
       </div>
 

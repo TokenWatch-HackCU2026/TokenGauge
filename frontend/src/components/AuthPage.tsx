@@ -15,9 +15,32 @@ export default function AuthPage({ onAuth }: Props) {
   const [slow, setSlow] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  function validateRegister(): string | null {
+  if (!/^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/.test(email))
+    return "Invalid email format";
+  if (password.length < 8)
+    return "Password must be at least 8 characters long";
+  if (!/[A-Z]/.test(password))
+    return "Password must contain at least one uppercase letter";
+  if (!/[a-z]/.test(password))
+    return "Password must contain at least one lowercase letter";
+  if (!/\d/.test(password))
+    return "Password must contain at least one number";
+  return null;
+}
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    if (mode === "register") {
+    const validationError = validateRegister();
+    if (validationError) {
+      setError(validationError);
+      return;
+      }
+    }
+    
     setSlow(false);
     setLoading(true);
     const slowTimer = setTimeout(() => setSlow(true), 5000);
