@@ -401,7 +401,7 @@ function bucketInfoFromDate(d: Date, gran: Granularity): { sort: string; label: 
     }
     case "12hr": {
       const half = H < 12 ? "AM" : "PM";
-      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}T${half}`, label: `${M+1}/${D} ${half}` };
+      return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}T${half}`, label: `${pad2(D)} ${half}` };
     }
     case "1day":
       return { sort: `${Y}-${pad2(M+1)}-${pad2(D)}`, label: `${pad2(M+1)}/${pad2(D)}` };
@@ -500,17 +500,17 @@ function generateTimeline(range: Range, gran: Granularity): { sort: string; labe
 function rangeToBarGranularity(range: Range): Granularity {
   switch (range) {
     case "live":  return "15min";
-    case "1D":    return "4hr";
-    case "1W":    return "12hr";
-    case "1M":    return "2day";
-    case "3M":    return "1week";
-    case "YTD": case "1Y": return "1month";
-    case "ALL":   return "1month";
+    case "1D":    return "1hr";
+    case "1W":    return "4hr";
+    case "1M":    return "1day";
+    case "3M":    return "2day";
+    case "YTD": case "1Y": return "1week";
+    case "ALL":   return "1week";
   }
 }
 
 const MAX_GROUPED_BINS = 20;
-const MAX_STACKED_BINS = 30;
+const MAX_STACKED_BINS = 60;
 
 // Build bar-chart-ready data from raw records
 function buildBarData(
@@ -538,8 +538,9 @@ function buildBarData(
   const models = Array.from(modelSet);
 
   // Build rows from timeline
-  let rows = timeline.map(({ sort, label }) => {
-    const row: Record<string, string | number> = { date: label };
+  let rows = timeline.map(({ sort }) => {
+    const d = new Date(sort.includes("T") ? sort : sort + "T00:00");
+    const row: Record<string, string | number> = { date: detailDate(d, gran) };
     for (const m of models) row[m] = filled[sort]?.[m] ?? 0;
     return row;
   });
@@ -697,9 +698,9 @@ function CostBarChart({ records, mobile }: { records: ApiCall[]; mobile: boolean
         <div style={{ color: C.muted, fontSize: "0.78rem" }}>Total: {fmtCost(grandTotal)}</div>
       </div>
       <ResponsiveContainer width="100%" height={mobile ? 220 : 260}>
-        <BarChart data={data} layout="vertical" margin={{ top: 4, right: 12, bottom: 4, left: 4 }} barCategoryGap="18%">
-          <XAxis type="number" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} />
-          <YAxis type="category" dataKey="model" tick={{ fill: C.subtle, fontSize: 11 }} axisLine={false} tickLine={false} width={mobile ? 80 : 120} />
+        <BarChart data={data} layout="vertical" margin={{ top: 4, right: 40, bottom: 4, left: 4 }} barCategoryGap="18%">
+          <XAxis type="number" tick={{ fill: C.muted, fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => fmtCost(v)} />
+          <YAxis type="category" dataKey="model" tick={{ fill: C.subtle, fontSize: 10 }} axisLine={false} tickLine={false} width={mobile ? 100 : 140} />
           <Tooltip content={<ModelBarTooltip fmtValue={fmtCost} />} cursor={{ fill: `${C.muted}15` }} />
           <Bar dataKey="value" radius={[0, 4, 4, 0]} isAnimationActive={false}>
             {data.map((d, i) => {
@@ -734,9 +735,9 @@ function RequestsBarChart({ records, mobile }: { records: ApiCall[]; mobile: boo
         <div style={{ color: C.muted, fontSize: "0.78rem" }}>Total: {fmtNum(grandTotal)}</div>
       </div>
       <ResponsiveContainer width="100%" height={mobile ? 220 : 260}>
-        <BarChart data={data} layout="vertical" margin={{ top: 4, right: 12, bottom: 4, left: 4 }} barCategoryGap="18%">
-          <XAxis type="number" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => fmtNum(v)} />
-          <YAxis type="category" dataKey="model" tick={{ fill: C.subtle, fontSize: 11 }} axisLine={false} tickLine={false} width={mobile ? 80 : 120} />
+        <BarChart data={data} layout="vertical" margin={{ top: 4, right: 40, bottom: 4, left: 4 }} barCategoryGap="18%">
+          <XAxis type="number" tick={{ fill: C.muted, fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => fmtNum(v)} />
+          <YAxis type="category" dataKey="model" tick={{ fill: C.subtle, fontSize: 10 }} axisLine={false} tickLine={false} width={mobile ? 100 : 140} />
           <Tooltip content={<ModelBarTooltip fmtValue={fmtNum} />} cursor={{ fill: `${C.muted}15` }} />
           <Bar dataKey="value" radius={[0, 4, 4, 0]} isAnimationActive={false}>
             {data.map((d, i) => {
@@ -784,8 +785,8 @@ function TokensStackedChart({ records, range, mobile }: { records: ApiCall[]; ra
         <div style={{ color: C.muted, fontSize: "0.78rem" }}>Relative proportion per time bucket (100% normalized)</div>
       </div>
       <ResponsiveContainer width="100%" height={mobile ? 240 : 280}>
-        <BarChart data={normData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }} barCategoryGap="4%">
-          <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }} axisLine={false} tickLine={false} interval={0} />
+        <BarChart data={normData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }} barCategoryGap="1%">
+          <XAxis dataKey="date" hide />
           <YAxis domain={[0, 100]} tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `${v}%`} width={40} />
           <Tooltip
             content={(props: any) => (
@@ -826,8 +827,55 @@ function linReg(xs: number[], ys: number[]): { slope: number; intercept: number 
   return { slope, intercept: my - slope * mx };
 }
 
+// Finer granularity for the forecast chart (more bins than the bar charts)
+function rangeToForecastGranularity(range: Range): Granularity {
+  switch (range) {
+    case "live":  return "15min";
+    case "1D":    return "1hr";
+    case "1W":    return "4hr";
+    case "1M":    return "1day";
+    case "3M":    return "2day";
+    case "YTD": case "1Y": return "1week";
+    case "ALL":   return "1week";
+  }
+}
+
+// Forecast bins to project forward
+function forecastBinCount(range: Range): number {
+  switch (range) {
+    case "live": return 6;
+    case "1D":   return 6;
+    case "1W":   return 8;
+    case "1M":   return 10;
+    case "3M":   return 8;
+    case "YTD": case "1Y": return 6;
+    case "ALL":  return 6;
+  }
+}
+
+// Human-readable date for tooltip display
+function detailDate(d: Date, gran: Granularity): string {
+  const mon = d.toLocaleString("default", { month: "short" });
+  const day = d.getDate();
+  const h = d.getHours();
+  const h12 = h % 12 || 12;
+  const ampm = h >= 12 ? "PM" : "AM";
+  switch (gran) {
+    case "15s": case "15min":
+      return `${mon} ${day}, ${h12}:${pad2(d.getMinutes())} ${ampm}`;
+    case "1hr": case "4hr": case "12hr":
+      return `${mon} ${day}, ${h12}:00 ${ampm}`;
+    case "1day": case "2day":
+      return `${mon} ${day}`;
+    case "1week":
+      return `Week of ${mon} ${day}`;
+    case "1month":
+      return `${d.toLocaleString("default", { month: "long" })} ${d.getFullYear()}`;
+  }
+}
+
 function buildForecastBuckets(records: ApiCall[], range: Range) {
-  const gran = rangeToBarGranularity(range);
+  const gran = rangeToForecastGranularity(range);
   const timeline = generateTimeline(range, gran);
 
   // Accumulate cost per bucket
@@ -838,25 +886,15 @@ function buildForecastBuckets(records: ApiCall[], range: Range) {
     if (sort in filled) filled[sort] = (filled[sort] ?? 0) + r.cost_usd;
   }
 
-  return timeline.map(({ sort, label }, i) => ({
-    label, bucketIndex: i, actual: filled[sort] ?? 0,
+  // Reconstruct dates from sort keys for detailed tooltip labels
+  return timeline.map(({ sort }, i) => ({
+    bucketIndex: i,
+    actual: filled[sort] ?? 0,
+    detail: detailDate(new Date(sort.includes("T") ? sort : sort + "T00:00"), gran),
   }));
 }
 
-// How many forecast bins to add (roughly half the history length, capped)
-function forecastBinCount(range: Range): number {
-  switch (range) {
-    case "live": return 4;
-    case "1D":   return 3;
-    case "1W":   return 7;
-    case "1M":   return 7;
-    case "3M":   return 4;
-    case "YTD": case "1Y": return 3;
-    case "ALL":  return 3;
-  }
-}
-
-// Advance a date by one granularity step and return the label
+// Advance a date by one granularity step and return the detail label
 function advanceBucket(cursor: Date, gran: Granularity): string {
   switch (gran) {
     case "15s":  cursor.setSeconds(cursor.getSeconds() + 15); break;
@@ -869,12 +907,12 @@ function advanceBucket(cursor: Date, gran: Granularity): string {
     case "1week": cursor.setDate(cursor.getDate() + 7); break;
     case "1month": cursor.setMonth(cursor.getMonth() + 1); break;
   }
-  return bucketInfoFromDate(cursor, gran).label;
+  return detailDate(cursor, gran);
 }
 
 // ─── Forecast Tooltip ────────────────────────────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function ForecastTooltip({ active, payload, label }: any) {
+function ForecastTooltip({ active, payload }: any) {
   if (!active || !payload?.length) return null;
   const pt = payload[0]?.payload;
   const trend = pt?.histTrend ?? pt?.forecastTrend;
@@ -883,7 +921,7 @@ function ForecastTooltip({ active, payload, label }: any) {
       background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10,
       padding: "0.6rem 0.85rem", boxShadow: "0 4px 20px rgba(0,0,0,0.4)", minWidth: 140,
     }}>
-      <div style={{ fontSize: "0.75rem", color: C.muted, marginBottom: 6 }}>{label}{pt?.isForecast ? " (forecast)" : ""}</div>
+      <div style={{ fontSize: "0.75rem", color: C.muted, marginBottom: 6 }}>{pt?.detail}{pt?.isForecast ? " (forecast)" : ""}</div>
       {pt?.actual !== undefined && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
           <span style={{ width: 8, height: 8, borderRadius: 2, background: C.accent, opacity: 0.85, flexShrink: 0 }} />
@@ -932,12 +970,12 @@ function CostForecastChart({ records, range, mobile }: { records: ApiCall[]; ran
     };
 
     const data: {
-      label: string; actual?: number;
+      detail: string; actual?: number;
       histTrend?: number; forecastTrend?: number;
       lower?: number; bandWidth?: number; isForecast: boolean;
     }[] = historical.map(d => {
       const { y } = predict(d.bucketIndex);
-      return { label: d.label, actual: d.actual, histTrend: y, isForecast: false };
+      return { detail: d.detail, actual: d.actual, histTrend: y, isForecast: false };
     });
 
     // Boundary point: last historical also starts forecast line
@@ -946,15 +984,15 @@ function CostForecastChart({ records, range, mobile }: { records: ApiCall[]; ran
     data[data.length - 1].forecastTrend = boundaryY;
 
     // Generate forecast bins
-    const gran = rangeToBarGranularity(range);
+    const gran = rangeToForecastGranularity(range);
     const cursor = new Date();
     let total = 0;
     for (let i = 1; i <= FORECAST_BINS; i++) {
       const xi = historical.length - 1 + i;
-      const label = advanceBucket(cursor, gran);
+      const detail = advanceBucket(cursor, gran);
       const { y, lower, upper } = predict(xi);
       total += y;
-      data.push({ label, forecastTrend: y, lower, bandWidth: upper - lower, isForecast: true });
+      data.push({ detail, forecastTrend: y, lower, bandWidth: upper - lower, isForecast: true });
     }
 
     return { chartData: data, forecastTotal: total };
@@ -983,7 +1021,7 @@ function CostForecastChart({ records, range, mobile }: { records: ApiCall[]; ran
       </div>
       <ResponsiveContainer width="100%" height={mobile ? 220 : 260}>
         <ComposedChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
-          <XAxis dataKey="label" tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+          <XAxis dataKey="detail" hide />
           <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtCost} width={50} />
           <Tooltip content={<ForecastTooltip />} cursor={{ fill: `${C.muted}15` }} />
           {/* Confidence band using stacked area trick */}
