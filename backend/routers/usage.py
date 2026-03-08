@@ -7,7 +7,7 @@ from typing import List
 from beanie import PydanticObjectId
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from jose import JWTError, jwt
 
 from auth import get_current_user
@@ -177,11 +177,8 @@ async def recalculate_costs(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/webhook/atlas")
-async def atlas_webhook(request: Request, x_atlas_secret: str = Header(None)):
+async def atlas_webhook(request: Request):
     """Receive insert events from MongoDB Atlas Triggers and push to open WebSocket queues."""
-    secret = os.environ.get("ATLAS_WEBHOOK_SECRET", "")
-    if not secret or x_atlas_secret != secret:
-        raise HTTPException(status_code=403, detail="Forbidden")
 
     payload = await request.json()
 
